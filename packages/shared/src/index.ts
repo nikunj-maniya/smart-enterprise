@@ -48,3 +48,38 @@ export interface AuthTokens {
 export interface LoginResponse extends AuthTokens {
   user: AuthUser;
 }
+
+// ── Enterprise registration ──────────────────────────────────
+export const registrationStatus = z.enum(['Pending', 'Accepted', 'Rejected']);
+export type RegistrationStatus = z.infer<typeof registrationStatus>;
+
+export const registerEnterpriseRequestSchema = z.object({
+  companyName: z.string().min(1, 'Company name is required'),
+  industry: z.string().min(1, 'Industry is required'),
+  size: z.string().min(1, 'Company size is required'),
+  website: z.string().optional(),
+  contactName: z.string().min(1, 'Admin full name is required'),
+  contactEmail: z.string().email(),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+export type RegisterEnterpriseRequest = z.infer<typeof registerEnterpriseRequestSchema>;
+
+export const rejectRegistrationRequestSchema = z.object({
+  reason: z.string().min(1, 'A reason is required'),
+});
+export type RejectRegistrationRequest = z.infer<typeof rejectRegistrationRequestSchema>;
+
+/** Registration queue row shown to the System Admin. */
+export const enterpriseRegistrationSchema = z.object({
+  id: z.string(),
+  companyName: z.string(),
+  contactName: z.string(),
+  contactEmail: z.string(),
+  size: z.string().nullable(),
+  industry: z.string().nullable(),
+  website: z.string().nullable(),
+  status: registrationStatus,
+  reviewNote: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type EnterpriseRegistrationDto = z.infer<typeof enterpriseRegistrationSchema>;

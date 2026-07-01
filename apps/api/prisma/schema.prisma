@@ -60,19 +60,26 @@ model Tenant {
   requests    Request[]
   notifications Notification[]
   auditLogs   AuditLog[]
+  registration EnterpriseRegistration?
 }
 
 model EnterpriseRegistration {
   id           String             @id @default(cuid())
+  tenantId     String             @unique
+  userId       String             @unique
   companyName  String
   contactName  String
   contactEmail String
   size         String?
   industry     String?
+  website      String?
   status       RegistrationStatus @default(Pending)
   reviewedBy   String?
   reviewNote   String?
   createdAt    DateTime           @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
 }
 
 // ── Identity ───────────────────────────────────────────────
@@ -93,6 +100,7 @@ model User {
   projectMembers ProjectMember[]
   leaveBalances  LeaveBalance[]
   requests       Request[]
+  registration   EnterpriseRegistration?
 
   @@index([tenantId])
 }
