@@ -26,6 +26,10 @@
   --line: rgb(217, 217, 217);
   --line-soft: rgb(230, 230, 230);
 
+  /* Sidebar (near-black product nav) */
+  --nav-bg: rgb(18, 18, 18);
+  --nav-active: rgb(0, 230, 230);
+
   /* Status */
   --success: rgb(70, 167, 88);
   --warning: rgb(247, 107, 21);
