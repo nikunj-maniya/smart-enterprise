@@ -69,7 +69,7 @@ export function Sidebar() {
   return (
     <div
       className="flex w-[248px] flex-none flex-col px-[14px] py-[18px]"
-      style={{ background: 'var(--nav-bg)' }}
+      style={{ background: 'var(--brand)' }}
     >
       {/* Brand */}
       <div className="flex items-center gap-3 px-2 pb-5 pt-[6px]">
