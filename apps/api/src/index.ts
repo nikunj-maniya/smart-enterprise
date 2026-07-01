@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import type { HealthResponse } from '@se/shared';
+import { authRouter } from './modules/auth/auth.routes.js';
+import { errorHandler } from './middleware/error.js';
 
 const app = express();
 app.use(cors());
@@ -15,6 +17,10 @@ app.get('/health', (_req, res) => {
   };
   res.json(body);
 });
+
+app.use('/auth', authRouter);
+
+app.use(errorHandler);
 
 const port = Number(process.env.API_PORT ?? 4000);
 app.listen(port, () => {

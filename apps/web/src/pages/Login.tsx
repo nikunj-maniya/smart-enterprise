@@ -1,15 +1,19 @@
 import * as React from 'react';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { Mail, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AuthField } from '@/components/AuthField';
+import { useAuth } from '@/lib/auth';
+import { ApiError } from '@/lib/api';
 
 /** Brand logo mark (from the design). */
-function LogoMark({ size = 42, onDark = true }: { size?: number; onDark?: boolean }) {
+function LogoMark({ size = 42 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
-      <rect width="40" height="40" rx="11" fill={onDark ? '#fff' : '#163E3E'} />
+      <rect width="40" height="40" rx="11" fill="#fff" />
       <path
         d="M10.5 20.5 L17 27 L29.5 12.5"
-        stroke={onDark ? '#163E3E' : '#fff'}
+        stroke="#163E3E"
         strokeWidth="3.4"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -19,34 +23,31 @@ function LogoMark({ size = 42, onDark = true }: { size?: number; onDark?: boolea
   );
 }
 
-/** Icon + input row, matching the design's field styling. */
-function Field({
-  label,
-  icon,
-  type,
-  defaultValue,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  type: string;
-  defaultValue?: string;
-}) {
-  return (
-    <label className="flex w-full flex-col gap-2">
-      <span className="text-sm font-semibold text-ink-900">{label}</span>
-      <div className="flex h-[46px] items-center gap-[9px] rounded-sm border border-line bg-surface px-[13px]">
-        <span className="flex flex-none text-ink-300">{icon}</span>
-        <input
-          type={type}
-          defaultValue={defaultValue}
-          className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
-        />
-      </div>
-    </label>
-  );
-}
-
 export default function Login() {
+  const { user, login } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = React.useState('systemadmin@smartenterprise.com');
+  const [password, setPassword] = React.useState('');
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  if (user) {
+    return <Navigate to={user.mustChangePassword ? '/change-password' : '/'} replace />;
+  }
+
+  async function onSubmit() {
+    setError(null);
+    setBusy(true);
+    try {
+      const u = await login(email, password);
+      navigate(u.mustChangePassword ? '/change-password' : '/', { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to log in.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="flex min-h-screen">
       {/* Left brand panel */}
@@ -85,27 +86,43 @@ export default function Login() {
 
       {/* Right form panel */}
       <div className="flex flex-1 items-center justify-center p-10">
-        <div className="w-full max-w-[392px]">
+        <form
+          className="w-full max-w-[392px]"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit();
+          }}
+        >
           <div className="text-[30px] font-bold tracking-[-.5px]">Welcome back</div>
           <div className="mt-2 text-sm text-ink-400">Log in to your Smart Enterprise account.</div>
 
           <div className="mt-[30px] flex flex-col gap-[18px]">
-            <Field
+            <AuthField
               label="Email"
               type="email"
-              defaultValue="systemadmin@smartenterprise.com"
+              value={email}
+              onChange={setEmail}
               icon={<Mail size={18} />}
             />
-            <Field label="Password" type="password" defaultValue="Smart@123" icon={<Lock size={18} />} />
+            <AuthField
+              label="Password"
+              type="password"
+              value={password}
+              onChange={setPassword}
+              placeholder="Enter your password"
+              icon={<Lock size={18} />}
+            />
           </div>
+
+          {error && <div className="mt-4 text-sm font-medium text-danger">{error}</div>}
 
           <div className="mt-[10px] cursor-pointer text-right text-[13px] font-semibold text-brand-hover">
             Forgot password?
           </div>
 
           <div className="mt-[22px]">
-            <Button size="lg" fullWidth className="h-12">
-              Log In
+            <Button type="submit" size="lg" fullWidth className="h-12" disabled={busy}>
+              {busy ? 'Logging in…' : 'Log In'}
             </Button>
           </div>
 
@@ -116,11 +133,11 @@ export default function Login() {
           </div>
 
           <div className="mt-[18px]">
-            <Button variant="outline" fullWidth className="h-10">
+            <Button type="button" variant="outline" fullWidth className="h-10">
               Register your enterprise
             </Button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );
