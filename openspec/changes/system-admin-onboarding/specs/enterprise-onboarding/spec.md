@@ -18,9 +18,9 @@ Only a System Admin SHALL review registrations and Accept or Reject them.
 - **WHEN** a System Admin Accepts a pending registration
 - **THEN** the enterprise becomes Active and the Enterprise Admin account is activated in one transaction, with no invite email sent
 
-#### Scenario: Reject captures a reason and frees the email
+#### Scenario: Reject captures a reason
 - **WHEN** a System Admin Rejects a registration with a reason
-- **THEN** the registration is marked Rejected, the account stays inactive, and the email is released so the same company may register again
+- **THEN** the registration is marked Rejected, the account stays inactive, and that email is permanently blocked from submitting another registration
 
 ### Requirement: Enterprise suspend / reactivate
 A System Admin SHALL be able to suspend an active enterprise and reactivate a suspended one.

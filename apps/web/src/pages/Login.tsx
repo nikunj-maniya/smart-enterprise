@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { useNavigate, Navigate, Link } from 'react-router-dom';
 import { Mail, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AuthField } from '@/components/AuthField';
@@ -133,9 +133,11 @@ export default function Login() {
           </div>
 
           <div className="mt-[18px]">
-            <Button type="button" variant="outline" fullWidth className="h-10">
-              Register your enterprise
-            </Button>
+            <Link to="/register">
+              <Button type="button" variant="outline" fullWidth className="h-10">
+                Register your enterprise
+              </Button>
+            </Link>
           </div>
         </form>
       </div>

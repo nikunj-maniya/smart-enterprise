@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { useRegistrationsCount } from '@/lib/registrationsCount';
 import { cn } from '@/lib/utils';
 
 const platformNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
@@ -25,11 +26,13 @@ function SidebarLink({
   label,
   icon: Icon,
   end,
+  badge,
 }: {
   to: string;
   label: string;
   icon: LucideIcon;
   end?: boolean;
+  badge?: number;
 }) {
   return (
     <NavLink
@@ -37,15 +40,24 @@ function SidebarLink({
       end={end}
       className={({ isActive }) =>
         cn(
-          'flex h-[42px] items-center gap-3 rounded-md px-[10px] text-sm font-medium transition-colors',
+          'flex h-[42px] items-center gap-3 rounded-sm px-3 text-sm font-medium transition-colors',
           isActive
             ? 'bg-white/[0.08] text-white'
             : 'text-white/60 hover:bg-white/[0.05] hover:text-white',
         )
       }
     >
-      <Icon size={18} />
-      {label}
+      {({ isActive }) => (
+        <>
+          <Icon size={20} className={isActive ? 'text-accent-cyan' : ''} />
+          {label}
+          {!!badge && (
+            <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full border border-white/25 bg-[#163E3E] px-[7px] text-[11px] font-bold text-white">
+              {badge}
+            </span>
+          )}
+        </>
+      )}
     </NavLink>
   );
 }
@@ -66,6 +78,7 @@ function Initials({ name }: { name: string }) {
 
 export function Sidebar() {
   const { user, logout } = useAuth();
+  const { pendingCount } = useRegistrationsCount();
   return (
     <div
       className="flex w-[248px] flex-none flex-col px-[14px] py-[18px]"
@@ -95,7 +108,11 @@ export function Sidebar() {
       </div>
       <div className="flex flex-col gap-[3px]">
         {platformNav.map((item) => (
-          <SidebarLink key={item.to} {...item} />
+          <SidebarLink
+            key={item.to}
+            {...item}
+            badge={item.to === '/registrations' ? pendingCount : undefined}
+          />
         ))}
       </div>
 

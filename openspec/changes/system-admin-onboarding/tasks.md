@@ -7,12 +7,12 @@
 
 ## 2. Enterprise Onboarding
 
-- [ ] 2.1 Public registration endpoint: create `Tenant` + Enterprise Admin `User` as Pending/inactive, password hashed
-- [ ] 2.2 Build the public registration form + submitted-confirmation screen
-- [ ] 2.3 System Admin Accept: atomically activate enterprise + admin account
-- [ ] 2.4 System Admin Reject: capture reason, release the email reservation
-- [ ] 2.5 Suspend / Reactivate an enterprise
-- [ ] 2.6 Build the Registrations queue (Pending/All tabs), review modal, and reject-reason modal
+- [x] 2.1 Public registration endpoint: create `Tenant` + Enterprise Admin `User` as Pending/inactive, password hashed _(Slice 2)_
+- [x] 2.2 Build the public registration form + submitted-confirmation screen _(Slice 2)_
+- [x] 2.3 System Admin Accept: atomically activate enterprise + admin account _(Slice 2)_
+- [x] 2.4 System Admin Reject: capture reason; rejected email is permanently blocked from re-registration _(Slice 2)_
+- [ ] 2.5 Suspend / Reactivate an enterprise _(Slice 4)_
+- [x] 2.6 Build the Registrations queue (Pending/All tabs), review modal, and reject-reason modal _(Slice 2)_
 
 ## 3. System Admin Console
 

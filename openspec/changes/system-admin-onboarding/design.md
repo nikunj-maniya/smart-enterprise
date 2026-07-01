@@ -18,7 +18,7 @@ Builds directly on `setup-foundation`. The design's completed screens cover the 
 
 - **JWT (access + refresh) + argon2 hashing** per PRD §14 — matches the email/password-only decision and leaves SSO addable later.
 - **Accept is atomic** — `Tenant Pending→Active` and the pre-created Enterprise Admin `User` activation happen in one transaction; no invite email is sent (they use the password set at registration).
-- **Reject releases the reservation** — the pending account/email is freed so the same company/email can submit a fresh registration (PRD §5.1).
+- **Reject is permanent** — the `Tenant` becomes Rejected and the pre-created admin `User` becomes Inactive; that email can never be used to submit another registration (confirmed override of the PRD §5.1 "release" language — product decision, 2026-07-01).
 - **System Admin is the only cross-tenant actor** — the Platform Users and Audit views read across tenants; every other query stays tenant-scoped. This bypass lives in one guarded place.
 - **Audit log is append-only** — every accept/reject/suspend/reactivate and the first-login password change are written immutably (PRD §13).
 - **Force-change driven by a `resetPassword` flag** — the backend returns a `resetPassword` flag on the user; when set, login routes to a dedicated Change Password screen. On success the new password is persisted and the flag is cleared, so it never prompts again.

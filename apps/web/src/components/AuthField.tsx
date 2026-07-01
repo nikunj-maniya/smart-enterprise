@@ -10,7 +10,7 @@ export function AuthField({
   placeholder,
 }: {
   label: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   type: string;
   value: string;
   onChange: (v: string) => void;
@@ -20,7 +20,7 @@ export function AuthField({
     <label className="flex w-full flex-col gap-2">
       <span className="text-sm font-semibold text-ink-900">{label}</span>
       <div className="flex h-[46px] items-center gap-[9px] rounded-sm border border-line bg-surface px-[13px]">
-        <span className="flex flex-none text-ink-300">{icon}</span>
+        {icon && <span className="flex flex-none text-ink-300">{icon}</span>}
         <input
           type={type}
           value={value}
