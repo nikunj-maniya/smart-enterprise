@@ -4,7 +4,7 @@ Before any Phase-1 feature can be built, the project needs a running skeleton an
 
 ## What Changes
 
-- Scaffold a **monorepo**: `apps/web` (Vite + React + TS + shadcn/ui), `apps/api` (NestJS), `packages/shared` (Zod types).
+- Scaffold a **monorepo**: `apps/web` (Vite + React + TS + shadcn/ui), `apps/api` (Node.js + TypeScript + Express), `packages/shared` (Zod types).
 - Add **`docker-compose.yml`** running `api`, `web`, `postgres`, `redis`.
 - Add base config: TypeScript, ESLint/Prettier, `.env.example`, an API health-check endpoint.
 - Translate the **PRD §12 data model** into a Prisma schema with mandatory `tenant_id` isolation.

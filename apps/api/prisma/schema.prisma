@@ -1,0 +1,357 @@
+// smartEnterprise data model — PRD §12.
+// Every tenant-scoped table carries a non-null tenantId (isolation at the data layer).
+// The platform System Admin is the ONLY user with tenantId = null (not tenant-scoped).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  Pending
+  Active
+  Suspended
+  Rejected
+}
+
+enum UserStatus {
+  Pending
+  Active
+  Inactive
+  Suspended
+}
+
+enum RegistrationStatus {
+  Pending
+  Accepted
+  Rejected
+}
+
+enum FormRenderer {
+  core
+  generic
+}
+
+enum FormStatus {
+  draft
+  published
+  archived
+}
+
+// ── Tenancy ────────────────────────────────────────────────
+model Tenant {
+  id        String       @id @default(cuid())
+  name      String
+  branding  Json?
+  settings  Json?
+  status    TenantStatus @default(Pending)
+  createdAt DateTime     @default(now())
+
+  users       User[]
+  departments Department[]
+  roles       Role[]
+  projects    Project[]
+  leaveTypes  LeaveType[]
+  forms       FormDefinition[]
+  requests    Request[]
+  notifications Notification[]
+  auditLogs   AuditLog[]
+}
+
+model EnterpriseRegistration {
+  id           String             @id @default(cuid())
+  companyName  String
+  contactName  String
+  contactEmail String
+  size         String?
+  industry     String?
+  status       RegistrationStatus @default(Pending)
+  reviewedBy   String?
+  reviewNote   String?
+  createdAt    DateTime           @default(now())
+}
+
+// ── Identity ───────────────────────────────────────────────
+model User {
+  id                 String     @id @default(cuid())
+  tenantId           String? // null = platform System Admin
+  name               String
+  email              String     @unique
+  passwordHash       String
+  status             UserStatus @default(Pending)
+  mustChangePassword Boolean    @default(false) // drives forced password change (resetPassword flag)
+  isSystemAdmin      Boolean    @default(false)
+  createdAt          DateTime   @default(now())
+
+  tenant         Tenant?          @relation(fields: [tenantId], references: [id])
+  roles          UserRole[]
+  departments    UserDepartment[]
+  projectMembers ProjectMember[]
+  leaveBalances  LeaveBalance[]
+  requests       Request[]
+
+  @@index([tenantId])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  tenantId    String
+  key         String
+  name        String
+  permissions String[]
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id])
+  users  UserRole[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+model Department {
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id])
+  users  UserDepartment[]
+
+  @@index([tenantId])
+}
+
+model UserDepartment {
+  userId       String
+  departmentId String
+
+  user       User       @relation(fields: [userId], references: [id])
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@id([userId, departmentId])
+}
+
+model Project {
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id])
+  members ProjectMember[]
+
+  @@index([tenantId])
+}
+
+model ProjectMember {
+  projectId     String
+  userId        String
+  roleInProject String // PM | TL | member
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@id([projectId, userId])
+}
+
+// ── Leave ──────────────────────────────────────────────────
+model LeaveType {
+  id          String  @id @default(cuid())
+  tenantId    String
+  name        String
+  quota       Float   @default(0)
+  accrualRule Json?
+  isPaid      Boolean @default(true)
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id])
+  balances LeaveBalance[]
+
+  @@index([tenantId])
+}
+
+model LeaveBalance {
+  id          String @id @default(cuid())
+  userId      String
+  leaveTypeId String
+  balance     Float  @default(0)
+  period      String
+
+  user      User      @relation(fields: [userId], references: [id])
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([userId, leaveTypeId, period])
+}
+
+// ── Form engine (metadata) ─────────────────────────────────
+model FormDefinition {
+  id       String       @id @default(cuid())
+  tenantId String
+  key      String
+  title    String
+  version  Int          @default(1)
+  renderer FormRenderer @default(core)
+  status   FormStatus   @default(draft)
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  sections         FormSection[]
+  approvalWorkflow ApprovalWorkflow?
+  statusModel      StatusModel?
+  requests         Request[]
+
+  @@unique([tenantId, key, version])
+  @@index([tenantId])
+}
+
+model FormSection {
+  id               String  @id @default(cuid())
+  formDefinitionId String
+  order            Int
+  title            String
+  visibilityRule   Json?
+
+  form   FormDefinition @relation(fields: [formDefinitionId], references: [id])
+  fields FormField[]
+}
+
+model FormField {
+  id             String  @id @default(cuid())
+  sectionId      String
+  key            String
+  label          String
+  type           String
+  required       Boolean @default(false)
+  options        Json?
+  validation     Json?
+  visibilityRule Json?
+
+  section FormSection @relation(fields: [sectionId], references: [id])
+}
+
+model ApprovalWorkflow {
+  id               String @id @default(cuid())
+  formDefinitionId String @unique
+  mode             String @default("parallel")
+  stageRules       Json?
+
+  form FormDefinition @relation(fields: [formDefinitionId], references: [id])
+}
+
+model StatusModel {
+  id               String @id @default(cuid())
+  formDefinitionId String @unique
+  states           Json
+  transitions      Json
+
+  form FormDefinition @relation(fields: [formDefinitionId], references: [id])
+}
+
+// ── Requests ───────────────────────────────────────────────
+// Hybrid storage: canonical `payload` JSONB + promoted typed columns for
+// cross-cutting queries (absence calendar, leave balance, dashboards).
+model Request {
+  id               String   @id @default(cuid())
+  tenantId         String
+  formDefinitionId String
+  formVersion      Int
+  requesterId      String
+  status           String
+  payload          Json
+
+  // Promoted typed columns
+  startDate     DateTime?
+  endDate       DateTime?
+  totalDays     Float?
+  halfDayCount  Float?
+  leaveTypeId   String?
+  departmentId  String?
+  projectId     String?
+
+  createdAt DateTime @default(now())
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id])
+  form          FormDefinition         @relation(fields: [formDefinitionId], references: [id])
+  requester     User                   @relation(fields: [requesterId], references: [id])
+  approvers     RequestApprover[]
+  statusHistory RequestStatusHistory[]
+  visitor       Visitor?
+
+  @@index([tenantId])
+  @@index([startDate, endDate])
+}
+
+model RequestApprover {
+  id          String    @id @default(cuid())
+  requestId   String
+  approverId  String
+  roleContext String
+  decision    String? // pending | approved | rejected
+  decidedAt   DateTime?
+  comment     String?
+
+  request Request @relation(fields: [requestId], references: [id])
+}
+
+model RequestStatusHistory {
+  id        String   @id @default(cuid())
+  requestId String
+  fromState String?
+  toState   String
+  actorId   String?
+  note      String?
+  at        DateTime @default(now())
+
+  request Request @relation(fields: [requestId], references: [id])
+}
+
+model Visitor {
+  id          String    @id @default(cuid())
+  requestId   String    @unique
+  checkInAt   DateTime?
+  checkOutAt  DateTime?
+  consent     Boolean   @default(false)
+  // signature deferred to a later phase (object storage)
+
+  request Request @relation(fields: [requestId], references: [id])
+}
+
+// ── Platform ───────────────────────────────────────────────
+model Notification {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  type      String
+  payload   Json
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId, read])
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  tenantId String?
+  actorId  String?
+  entity   String
+  entityId String
+  action   String
+  before   Json?
+  after    Json?
+  at       DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}

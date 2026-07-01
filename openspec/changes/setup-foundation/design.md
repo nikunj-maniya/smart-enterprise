@@ -1,6 +1,6 @@
 ## Context
 
-The repo currently holds only the PRD and specs — no runnable app and no database schema. This change creates the skeleton and data layer every Phase-1 feature builds on. Stack is fixed by PRD §14 (Node/TS + NestJS + Prisma, Vite/React/shadcn, PostgreSQL, Redis, Docker). Single timezone: India (Asia/Kolkata).
+The repo currently holds only the PRD and specs — no runnable app and no database schema. This change creates the skeleton and data layer every Phase-1 feature builds on. Stack is fixed by PRD §14 (Node/TS + Express + Prisma, Vite/React/shadcn, PostgreSQL, Redis, Docker). Single timezone: India (Asia/Kolkata).
 
 ## Goals / Non-Goals
 

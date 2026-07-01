@@ -522,7 +522,7 @@ Visitor(... extends Request: check_in_at, check_out_at, signature, consent)
 | Layer | Choice | Rationale |
 |---|---|---|
 | **Backend runtime** | **Node.js + TypeScript** | Confirmed. Shares language/types with the frontend. |
-| Backend framework | **NestJS** | Modular, dependency injection, first-class TypeScript, clean fit for RBAC/workflow modules. |
+| Backend framework | **Express** (Node.js + TypeScript) | Minimal, unopinionated, plain Node/TS; middleware-based RBAC/validation. No heavyweight framework (NestJS explicitly not used). |
 | **ORM** | **Prisma** (primary recommendation) | Type-safe, excellent migrations & DX; tenant scoping enforced in the data-access layer. *(Drizzle is a lighter alternative if you prefer SQL-first.)* |
 | Validation | **Zod** (shared FE/BE schemas) + class-validator | One schema definition reused by API and the dynamic form renderer. |
 | Auth | JWT (access + refresh tokens), **argon2** password hashing | Matches email/password decision; SSO addable later. |
@@ -598,7 +598,7 @@ Visitor(... extends Request: check_in_at, check_out_at, signature, consent)
 3. **Leave quotas** → managed by the Enterprise Admin on the **Leave Policy & Quotas** page.
 
 ### 17.3 Tech stack — confirmed
-- Backend **Node.js + TypeScript** (NestJS + Prisma), Frontend **Vite + React + TypeScript + shadcn/ui**, **PostgreSQL**, **Docker**. Supporting libraries chosen in §14.
+- Backend **Node.js + TypeScript** (Express + Prisma), Frontend **Vite + React + TypeScript + shadcn/ui**, **PostgreSQL**, **Docker**. Supporting libraries chosen in §14.
 
 ### 17.4 Infra — confirmed
 - **Deployment:** Docker-deployable anywhere (self-contained app + PostgreSQL + Redis containers; no cloud lock-in).
