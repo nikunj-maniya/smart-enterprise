@@ -19,7 +19,7 @@
 - [x] 3.1 Overview dashboard: pending/active/users/suspended counts, latest registrations, recent activity _(Slice 3)_
 - [x] 3.2 Enterprises list with Suspend/Reactivate actions _(Slice 4)_
 - [x] 3.3 Platform Users read-only cross-enterprise view _(Slice 5)_
-- [ ] 3.4 Immutable Audit Log view
+- [x] 3.4 Immutable Audit Log view _(Slice 6)_
 - [ ] 3.5 Platform Settings: persist and enforce the three toggles (not display-only)
 
 ## 4. Verify
