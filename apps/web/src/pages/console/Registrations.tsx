@@ -1,6 +1,10 @@
 import * as React from 'react';
-import { Check, XCircle, Info } from 'lucide-react';
-import { RegistrationStatus, type EnterpriseRegistrationDto } from '@se/shared';
+import { Check, XCircle, Info, Search, ChevronDown } from 'lucide-react';
+import {
+  RegistrationStatus,
+  type EnterpriseRegistrationDto,
+  type RegistrationsResponse,
+} from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
@@ -56,27 +60,46 @@ export default function Registrations() {
     RegistrationStatus.Pending,
   );
   const [rows, setRows] = React.useState<EnterpriseRegistrationDto[]>([]);
+  const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [reviewing, setReviewing] = React.useState<EnterpriseRegistrationDto | null>(null);
   const [rejecting, setRejecting] = React.useState<EnterpriseRegistrationDto | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [reason, setReason] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(20);
+  const [search, setSearch] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const { pendingCount, refresh: refreshSidebarCount } = useRegistrationsCount();
 
-  const load = React.useCallback(async (status: typeof RegistrationStatus.Pending | 'All') => {
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      const query = status === 'All' ? '' : `?status=${status}`;
-      setRows(await apiFetch<EnterpriseRegistrationDto[]>(`/registrations${query}`));
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (tab !== 'All') params.set('status', tab);
+
+      const res = await apiFetch<RegistrationsResponse>(`/registrations?${params.toString()}`);
+      setRows(res.rows);
+      setTotal(res.total);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize, debouncedSearch, tab]);
 
   React.useEffect(() => {
-    load(tab);
-  }, [tab, load]);
+    load();
+  }, [load]);
+
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, total);
+  const hasNextPage = page * pageSize < total;
 
   function openReject(reg: EnterpriseRegistrationDto) {
     setRejecting(reg);
@@ -90,7 +113,7 @@ export default function Registrations() {
     try {
       await apiFetch(`/registrations/${reg.id}/accept`, { method: 'POST' });
       setReviewing(null);
-      load(tab);
+      load();
       refreshSidebarCount();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to accept registration.');
@@ -114,7 +137,7 @@ export default function Registrations() {
       });
       setRejecting(null);
       setReviewing(null);
-      load(tab);
+      load();
       refreshSidebarCount();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to reject registration.');
@@ -132,7 +155,10 @@ export default function Registrations() {
 
       <div className="mt-[22px] flex w-fit gap-2 rounded-md border border-line-soft bg-surface p-[5px]">
         <button
-          onClick={() => setTab(RegistrationStatus.Pending)}
+          onClick={() => {
+            setTab(RegistrationStatus.Pending);
+            setPage(1);
+          }}
           className={`rounded-[7px] px-4 py-2 text-[13px] font-semibold transition-colors ${
             tab === RegistrationStatus.Pending ? 'bg-brand text-white' : 'bg-transparent text-ink-500'
           }`}
@@ -140,13 +166,32 @@ export default function Registrations() {
           Pending · {pendingCount}
         </button>
         <button
-          onClick={() => setTab('All')}
+          onClick={() => {
+            setTab('All');
+            setPage(1);
+          }}
           className={`rounded-[7px] px-4 py-2 text-[13px] font-semibold transition-colors ${
             tab === 'All' ? 'bg-brand text-white' : 'bg-transparent text-ink-500'
           }`}
         >
           All registrations
         </button>
+      </div>
+
+      <div className="mt-[18px] flex flex-wrap items-center gap-3">
+        <div className="flex h-11 w-[280px] items-center gap-2 rounded-sm border border-line bg-surface px-3">
+          <Search size={16} className="flex-none text-ink-300" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search by company, contact, or email"
+            className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
+          />
+        </div>
       </div>
 
       <div className="mt-[18px] overflow-x-auto rounded-lg border border-line-soft bg-surface shadow-card">
@@ -216,6 +261,51 @@ export default function Registrations() {
           </div>
         )}
         {loading && <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>}
+      </div>
+
+      <div className="mt-[18px] flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <span className="text-[13px] text-ink-400">
+            Showing {rangeStart}–{rangeEnd} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] text-ink-400">Rows per page</span>
+            <div className="relative flex items-center">
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="h-8 appearance-none rounded-sm border border-line bg-surface py-0 pl-2 pr-7 text-[13px] text-ink-900 outline-none"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <ChevronDown size={14} className="pointer-events-none absolute right-2 text-ink-400" />
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => p - 1)}
+            disabled={page === 1}
+          >
+            Prev
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!hasNextPage}
+          >
+            Next
+          </Button>
+        </div>
       </div>
 
       {reviewing && (

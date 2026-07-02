@@ -89,6 +89,22 @@ export const enterpriseRegistrationSchema = z.object({
 });
 export type EnterpriseRegistrationDto = z.infer<typeof enterpriseRegistrationSchema>;
 
+export const registrationsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().optional(),
+  status: registrationStatus.optional(),
+});
+export type RegistrationsQuery = z.infer<typeof registrationsQuerySchema>;
+
+export const registrationsResponseSchema = z.object({
+  rows: z.array(enterpriseRegistrationSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type RegistrationsResponse = z.infer<typeof registrationsResponseSchema>;
+
 // ── Platform overview ────────────────────────────────────────
 export const overviewCountsSchema = z.object({
   pending: z.number(),
@@ -159,3 +175,50 @@ export const enterpriseSchema = z.object({
   status: enterpriseStatus,
 });
 export type EnterpriseDto = z.infer<typeof enterpriseSchema>;
+
+export const enterprisesQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  // Enterprises are a much smaller-cardinality resource than users, hence the higher cap.
+  pageSize: z.coerce.number().int().min(1).max(200).default(20),
+  search: z.string().optional(),
+  status: enterpriseStatus.optional(),
+});
+export type EnterprisesQuery = z.infer<typeof enterprisesQuerySchema>;
+
+export const enterprisesResponseSchema = z.object({
+  rows: z.array(enterpriseSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type EnterprisesResponse = z.infer<typeof enterprisesResponseSchema>;
+
+// ── Platform users (cross-enterprise) ───────────────────────────
+export const platformUsersQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().optional(),
+  status: userStatus.optional(),
+  tenantId: z.string().optional(),
+});
+export type PlatformUsersQuery = z.infer<typeof platformUsersQuerySchema>;
+
+/** Row shown on the System Admin's cross-enterprise Platform Users page. */
+export const platformUserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: z.string(),
+  enterpriseName: z.string(),
+  status: userStatus,
+  createdAt: z.string(),
+});
+export type PlatformUserDto = z.infer<typeof platformUserSchema>;
+
+export const platformUsersResponseSchema = z.object({
+  rows: z.array(platformUserSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type PlatformUsersResponse = z.infer<typeof platformUsersResponseSchema>;

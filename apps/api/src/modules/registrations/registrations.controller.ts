@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import {
   registerEnterpriseRequestSchema,
   rejectRegistrationRequestSchema,
-  registrationStatus,
+  registrationsQuerySchema,
 } from '@se/shared';
 import * as registrationsService from './registrations.service.js';
 
@@ -17,10 +17,8 @@ export async function submit(req: Request, res: Response, next: NextFunction) {
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const status = req.query.status
-      ? registrationStatus.parse(req.query.status)
-      : undefined;
-    res.json(await registrationsService.listRegistrations(status));
+    const query = registrationsQuerySchema.parse(req.query);
+    res.json(await registrationsService.listRegistrations(query));
   } catch (err) {
     next(err);
   }
