@@ -20,3 +20,7 @@ Act as a cautious, high-precision senior engineer. Prioritize simplicity, correc
 ## 4. Goal-Driven Execution
 - Transform tasks into verifiable criteria (e.g., write/run a test to reproduce a bug or validate inputs first).
 - For multi-step tasks, state a brief plan with verification steps before executing, and loop until verified.
+
+## 5. UI/UX Task Workflow
+- Before implementing or modifying any UI/UX-related task (screens, components, styling, layout, forms), dispatch a subagent to fetch and review the relevant markup from the Claude Design project via the DesignSync tool (`get_file`, projectId `053346e7-8a9a-4991-b4a0-26705793f93b`, primary file `Smart Enterprise - Prototype.dc.html`) rather than fetching it inline. Have the subagent report back a summary of the relevant markup/structure/tokens.
+- Implement to match the design exactly — colors/tokens, interactive behavior, not just static layout.
