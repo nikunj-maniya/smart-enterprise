@@ -222,3 +222,38 @@ export const platformUsersResponseSchema = z.object({
   pageSize: z.number(),
 });
 export type PlatformUsersResponse = z.infer<typeof platformUsersResponseSchema>;
+
+// ── Immutable audit log ──────────────────────────────────────────
+export const auditLogQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().optional(),
+  action: auditActionSchema.optional(),
+  entity: z.string().optional(),
+  tenantId: z.string().optional(),
+});
+export type AuditLogQuery = z.infer<typeof auditLogQuerySchema>;
+
+/** Row shown on the System Admin's Audit Log page. */
+export const auditLogEntrySchema = z.object({
+  id: z.string(),
+  at: z.string(),
+  actor: z.string().nullable(),
+  actorId: z.string().nullable(),
+  tenant: z.string().nullable(),
+  tenantId: z.string().nullable(),
+  entity: z.string(),
+  entityId: z.string(),
+  action: z.string(),
+  before: z.unknown().nullable(),
+  after: z.unknown().nullable(),
+});
+export type AuditLogEntry = z.infer<typeof auditLogEntrySchema>;
+
+export const auditLogResponseSchema = z.object({
+  rows: z.array(auditLogEntrySchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type AuditLogResponse = z.infer<typeof auditLogResponseSchema>;
