@@ -120,3 +120,13 @@ export const overviewResponseSchema = z.object({
   recentActivity: z.array(recentActivitySchema),
 });
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
+
+// ── Notifications ─────────────────────────────────────────────
+export const notificationSchema = z.object({
+  id: z.string(),
+  type: z.literal('enterprise_registered'),
+  payload: z.object({ registrationId: z.string(), companyName: z.string() }),
+  read: z.boolean(),
+  createdAt: z.string(),
+});
+export type NotificationDto = z.infer<typeof notificationSchema>;

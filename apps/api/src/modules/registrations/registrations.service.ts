@@ -59,7 +59,7 @@ export async function submitRegistration(
         isSystemAdmin: false,
       },
     });
-    return tx.enterpriseRegistration.create({
+    const reg = await tx.enterpriseRegistration.create({
       data: {
         tenantId: tenant.id,
         userId: user.id,
@@ -72,6 +72,21 @@ export async function submitRegistration(
         status: 'Pending',
       },
     });
+
+    const admins = await tx.user.findMany({ where: { isSystemAdmin: true }, select: { id: true } });
+    if (admins.length > 0) {
+      await tx.notification.createMany({
+        data: admins.map((admin) => ({
+          tenantId: tenant.id,
+          userId: admin.id,
+          type: 'enterprise_registered',
+          payload: { registrationId: reg.id, companyName: input.companyName },
+          read: false,
+        })),
+      });
+    }
+
+    return reg;
   });
 
   return { id: registration.id };
