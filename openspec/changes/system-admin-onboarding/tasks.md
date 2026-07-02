@@ -16,7 +16,7 @@
 
 ## 3. System Admin Console
 
-- [ ] 3.1 Overview dashboard: pending/active/users/suspended counts, latest registrations, recent activity
+- [x] 3.1 Overview dashboard: pending/active/users/suspended counts, latest registrations, recent activity _(Slice 3)_
 - [ ] 3.2 Enterprises list with Suspend/Reactivate actions
 - [ ] 3.3 Platform Users read-only cross-enterprise view
 - [ ] 3.4 Immutable Audit Log view

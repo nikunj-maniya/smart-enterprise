@@ -4,6 +4,7 @@ import cors from 'cors';
 import type { HealthResponse } from '@se/shared';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { registrationsRouter } from './modules/registrations/registrations.routes.js';
+import { overviewRouter } from './modules/overview/overview.routes.js';
 import { errorHandler } from './middleware/error.js';
 
 const app = express();
@@ -21,6 +22,7 @@ app.get('/health', (_req, res) => {
 
 app.use('/auth', authRouter);
 app.use('/registrations', registrationsRouter);
+app.use('/overview', overviewRouter);
 
 app.use(errorHandler);
 

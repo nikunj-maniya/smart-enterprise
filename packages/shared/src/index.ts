@@ -83,3 +83,40 @@ export const enterpriseRegistrationSchema = z.object({
   createdAt: z.string(),
 });
 export type EnterpriseRegistrationDto = z.infer<typeof enterpriseRegistrationSchema>;
+
+// ── Platform overview ────────────────────────────────────────
+export const overviewCountsSchema = z.object({
+  pending: z.number(),
+  active: z.number(),
+  users: z.number(),
+  suspended: z.number(),
+});
+export type OverviewCounts = z.infer<typeof overviewCountsSchema>;
+
+export const recentRegistrationSchema = z.object({
+  id: z.string(),
+  companyName: z.string(),
+  contactName: z.string(),
+  status: registrationStatus,
+  createdAt: z.string(),
+});
+export type RecentRegistration = z.infer<typeof recentRegistrationSchema>;
+
+export const auditActionSchema = z.enum(['accept', 'reject']);
+export type AuditAction = z.infer<typeof auditActionSchema>;
+
+export const recentActivitySchema = z.object({
+  id: z.string(),
+  actor: z.string(),
+  action: auditActionSchema,
+  target: z.string(),
+  at: z.string(),
+});
+export type RecentActivity = z.infer<typeof recentActivitySchema>;
+
+export const overviewResponseSchema = z.object({
+  counts: overviewCountsSchema,
+  latestRegistrations: z.array(recentRegistrationSchema),
+  recentActivity: z.array(recentActivitySchema),
+});
+export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
