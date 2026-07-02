@@ -1,9 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
+import { enterprisesQuerySchema } from '@se/shared';
 import * as enterprisesService from './enterprises.service.js';
 
-export async function list(_req: Request, res: Response, next: NextFunction) {
+export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    res.json(await enterprisesService.listEnterprises());
+    const query = enterprisesQuerySchema.parse(req.query);
+    res.json(await enterprisesService.listEnterprises(query));
   } catch (err) {
     next(err);
   }

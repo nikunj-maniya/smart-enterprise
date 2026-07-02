@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { EnterpriseRegistrationDto } from '@se/shared';
+import type { RegistrationsResponse } from '@se/shared';
 import { apiFetch } from './api';
 import { useAuth } from './auth';
 
@@ -18,8 +18,8 @@ export function RegistrationsCountProvider({ children }: { children: React.React
 
   const refresh = React.useCallback(() => {
     if (!user?.isSystemAdmin) return;
-    apiFetch<EnterpriseRegistrationDto[]>('/registrations?status=Pending')
-      .then((rows) => setPendingCount(rows.length))
+    apiFetch<RegistrationsResponse>('/registrations?status=Pending&pageSize=1')
+      .then((res) => setPendingCount(res.total))
       .catch(() => {});
   }, [user?.isSystemAdmin]);
 

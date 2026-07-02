@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { PauseCircle } from 'lucide-react';
-import { EnterpriseStatus, type EnterpriseDto } from '@se/shared';
+import { PauseCircle, Search, ChevronDown } from 'lucide-react';
+import { EnterpriseStatus, type EnterpriseDto, type EnterprisesResponse } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
@@ -37,22 +37,43 @@ function StatusBadge({ status }: { status: EnterpriseDto['status'] }) {
 
 export default function Enterprises() {
   const [rows, setRows] = React.useState<EnterpriseDto[]>([]);
+  const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [confirming, setConfirming] = React.useState<EnterpriseDto | null>(null);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(20);
+  const [search, setSearch] = React.useState('');
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+  const [status, setStatus] = React.useState('');
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      setRows(await apiFetch<EnterpriseDto[]>('/enterprises'));
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (status) params.set('status', status);
+
+      const res = await apiFetch<EnterprisesResponse>(`/enterprises?${params.toString()}`);
+      setRows(res.rows);
+      setTotal(res.total);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize, debouncedSearch, status]);
 
   React.useEffect(() => {
     load();
   }, [load]);
+
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, total);
+  const hasNextPage = page * pageSize < total;
 
   async function onConfirmSuspend() {
     if (!confirming) return;
@@ -82,6 +103,43 @@ export default function Enterprises() {
         title="Enterprises"
         subtitle="All onboarded tenants. Suspend an enterprise to block its users from signing in."
       />
+
+      <div className="mt-[22px] flex flex-wrap items-center gap-3">
+        <div className="flex h-11 w-[280px] items-center gap-2 rounded-sm border border-line bg-surface px-3">
+          <Search size={16} className="flex-none text-ink-300" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search by name or industry"
+            className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
+          />
+        </div>
+        <div className="relative flex items-center">
+          <select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(1);
+            }}
+            className={`h-11 w-[180px] appearance-none rounded-sm border border-line bg-surface py-0 pl-3 pr-9 text-sm outline-none ${
+              status ? 'text-ink-900' : 'text-ink-300'
+            }`}
+          >
+            <option value="">All Statuses</option>
+            <option value={EnterpriseStatus.Active} className="text-ink-900">
+              Active
+            </option>
+            <option value={EnterpriseStatus.Suspended} className="text-ink-900">
+              Suspended
+            </option>
+          </select>
+          <ChevronDown size={18} className="pointer-events-none absolute right-3 text-ink-400" />
+        </div>
+      </div>
 
       <div className="mt-[22px] overflow-x-auto rounded-lg border border-line-soft bg-surface shadow-card">
         <div
@@ -140,6 +198,51 @@ export default function Enterprises() {
           <div className="px-4 py-12 text-center text-sm text-ink-400">No enterprises yet.</div>
         )}
         {loading && <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>}
+      </div>
+
+      <div className="mt-[18px] flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <span className="text-[13px] text-ink-400">
+            Showing {rangeStart}–{rangeEnd} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] text-ink-400">Rows per page</span>
+            <div className="relative flex items-center">
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="h-8 appearance-none rounded-sm border border-line bg-surface py-0 pl-2 pr-7 text-[13px] text-ink-900 outline-none"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <ChevronDown size={14} className="pointer-events-none absolute right-2 text-ink-400" />
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => p - 1)}
+            disabled={page === 1}
+          >
+            Prev
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!hasNextPage}
+          >
+            Next
+          </Button>
+        </div>
       </div>
 
       {confirming && (

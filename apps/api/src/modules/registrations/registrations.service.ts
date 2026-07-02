@@ -1,6 +1,11 @@
 import argon2 from 'argon2';
-import { TenantStatus, UserStatus } from '@prisma/client';
-import type { EnterpriseRegistrationDto, RegisterEnterpriseRequest } from '@se/shared';
+import { Prisma, TenantStatus, UserStatus } from '@prisma/client';
+import type {
+  EnterpriseRegistrationDto,
+  RegisterEnterpriseRequest,
+  RegistrationsQuery,
+  RegistrationsResponse,
+} from '@se/shared';
 import { AuditAction, RegistrationStatus } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
@@ -91,13 +96,39 @@ export async function submitRegistration(
 }
 
 export async function listRegistrations(
-  status?: RegistrationStatus,
-): Promise<EnterpriseRegistrationDto[]> {
-  const rows = await prisma.enterpriseRegistration.findMany({
-    where: status ? { status } : undefined,
-    orderBy: { createdAt: 'desc' },
-  });
-  return rows.map(toDto);
+  query: RegistrationsQuery,
+): Promise<RegistrationsResponse> {
+  const { page, pageSize, search, status } = query;
+
+  const where: Prisma.EnterpriseRegistrationWhereInput = {
+    ...(status ? { status } : {}),
+    ...(search
+      ? {
+          OR: [
+            { companyName: { contains: search, mode: 'insensitive' } },
+            { contactName: { contains: search, mode: 'insensitive' } },
+            { contactEmail: { contains: search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.enterpriseRegistration.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.enterpriseRegistration.count({ where }),
+  ]);
+
+  return {
+    rows: rows.map(toDto),
+    total,
+    page,
+    pageSize,
+  };
 }
 
 export async function acceptRegistration(
