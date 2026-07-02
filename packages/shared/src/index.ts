@@ -52,6 +52,11 @@ export interface LoginResponse extends AuthTokens {
 // ── Enterprise registration ──────────────────────────────────
 export const registrationStatus = z.enum(['Pending', 'Accepted', 'Rejected']);
 export type RegistrationStatus = z.infer<typeof registrationStatus>;
+export const RegistrationStatus = {
+  Pending: 'Pending',
+  Accepted: 'Accepted',
+  Rejected: 'Rejected',
+} satisfies Record<string, RegistrationStatus>;
 
 export const registerEnterpriseRequestSchema = z.object({
   companyName: z.string().min(1, 'Company name is required'),
@@ -102,8 +107,14 @@ export const recentRegistrationSchema = z.object({
 });
 export type RecentRegistration = z.infer<typeof recentRegistrationSchema>;
 
-export const auditActionSchema = z.enum(['accept', 'reject']);
+export const auditActionSchema = z.enum(['accept', 'reject', 'suspend', 'reactivate']);
 export type AuditAction = z.infer<typeof auditActionSchema>;
+export const AuditAction = {
+  Accept: 'accept',
+  Reject: 'reject',
+  Suspend: 'suspend',
+  Reactivate: 'reactivate',
+} satisfies Record<string, AuditAction>;
 
 export const recentActivitySchema = z.object({
   id: z.string(),
@@ -130,3 +141,21 @@ export const notificationSchema = z.object({
   createdAt: z.string(),
 });
 export type NotificationDto = z.infer<typeof notificationSchema>;
+
+// ── Enterprises (onboarded tenants) ─────────────────────────────
+export const enterpriseStatus = z.enum(['Active', 'Suspended']);
+export type EnterpriseStatus = z.infer<typeof enterpriseStatus>;
+export const EnterpriseStatus = {
+  Active: 'Active',
+  Suspended: 'Suspended',
+} satisfies Record<string, EnterpriseStatus>;
+
+export const enterpriseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  industry: z.string().nullable(),
+  users: z.number(),
+  since: z.string(),
+  status: enterpriseStatus,
+});
+export type EnterpriseDto = z.infer<typeof enterpriseSchema>;

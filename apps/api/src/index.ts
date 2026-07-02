@@ -6,6 +6,7 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { registrationsRouter } from './modules/registrations/registrations.routes.js';
 import { overviewRouter } from './modules/overview/overview.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
+import { enterprisesRouter } from './modules/enterprises/enterprises.routes.js';
 import { errorHandler } from './middleware/error.js';
 
 const app = express();
@@ -25,6 +26,7 @@ app.use('/auth', authRouter);
 app.use('/registrations', registrationsRouter);
 app.use('/overview', overviewRouter);
 app.use('/notifications', notificationsRouter);
+app.use('/enterprises', enterprisesRouter);
 
 app.use(errorHandler);
 

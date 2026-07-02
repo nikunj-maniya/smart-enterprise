@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { TenantStatus, UserStatus } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { verifyAccessToken } from '../lib/jwt.js';
 import { HttpError } from '../lib/http-error.js';
@@ -28,8 +29,8 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
     const token = header.slice('Bearer '.length);
     const payload = verifyAccessToken(token);
-    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
-    if (!user || user.status !== 'Active') {
+    const user = await prisma.user.findUnique({ where: { id: payload.sub }, include: { tenant: true } });
+    if (!user || user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
       throw new HttpError(401, 'User not found or inactive');
     }
     req.user = {

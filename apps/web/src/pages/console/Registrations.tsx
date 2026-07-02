@@ -1,8 +1,9 @@
 import * as React from 'react';
 import { Check, XCircle, Info } from 'lucide-react';
-import type { EnterpriseRegistrationDto } from '@se/shared';
+import { RegistrationStatus, type EnterpriseRegistrationDto } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useRegistrationsCount } from '@/lib/registrationsCount';
 
@@ -12,9 +13,9 @@ const STATUS_STYLE: Record<
   EnterpriseRegistrationDto['status'],
   { bg: string; fg: string; dot: string }
 > = {
-  Pending: { bg: 'rgb(255,247,237)', fg: 'rgb(204,78,0)', dot: 'rgb(247,107,21)' },
-  Accepted: { bg: 'rgb(233,246,233)', fg: 'rgb(33,131,88)', dot: 'rgb(70,167,88)' },
-  Rejected: { bg: 'rgb(254,235,236)', fg: 'rgb(206,44,49)', dot: 'rgb(229,72,77)' },
+  [RegistrationStatus.Pending]: { bg: 'rgb(255,247,237)', fg: 'rgb(204,78,0)', dot: 'rgb(247,107,21)' },
+  [RegistrationStatus.Accepted]: { bg: 'rgb(233,246,233)', fg: 'rgb(33,131,88)', dot: 'rgb(70,167,88)' },
+  [RegistrationStatus.Rejected]: { bg: 'rgb(254,235,236)', fg: 'rgb(206,44,49)', dot: 'rgb(229,72,77)' },
 };
 
 function initials(name: string) {
@@ -50,38 +51,10 @@ function Avatar({ name, size }: { name: string; size: number }) {
   );
 }
 
-function Overlay({
-  children,
-  onClose,
-  z = 50,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-  z?: number;
-}) {
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 flex items-center justify-center p-6"
-      style={{ background: 'rgba(10,20,20,.5)', zIndex: z }}
-      onClick={onClose}
-    >
-      <div className="w-full" onClick={(e) => e.stopPropagation()}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 export default function Registrations() {
-  const [tab, setTab] = React.useState<'Pending' | 'All'>('Pending');
+  const [tab, setTab] = React.useState<typeof RegistrationStatus.Pending | 'All'>(
+    RegistrationStatus.Pending,
+  );
   const [rows, setRows] = React.useState<EnterpriseRegistrationDto[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [reviewing, setReviewing] = React.useState<EnterpriseRegistrationDto | null>(null);
@@ -91,7 +64,7 @@ export default function Registrations() {
   const [error, setError] = React.useState<string | null>(null);
   const { pendingCount, refresh: refreshSidebarCount } = useRegistrationsCount();
 
-  const load = React.useCallback(async (status: 'Pending' | 'All') => {
+  const load = React.useCallback(async (status: typeof RegistrationStatus.Pending | 'All') => {
     setLoading(true);
     try {
       const query = status === 'All' ? '' : `?status=${status}`;
@@ -159,9 +132,9 @@ export default function Registrations() {
 
       <div className="mt-[22px] flex w-fit gap-2 rounded-md border border-line-soft bg-surface p-[5px]">
         <button
-          onClick={() => setTab('Pending')}
+          onClick={() => setTab(RegistrationStatus.Pending)}
           className={`rounded-[7px] px-4 py-2 text-[13px] font-semibold transition-colors ${
-            tab === 'Pending' ? 'bg-brand text-white' : 'bg-transparent text-ink-500'
+            tab === RegistrationStatus.Pending ? 'bg-brand text-white' : 'bg-transparent text-ink-500'
           }`}
         >
           Pending · {pendingCount}
@@ -214,7 +187,7 @@ export default function Registrations() {
               <StatusBadge status={reg.status} />
             </span>
             <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-              {reg.status === 'Pending' ? (
+              {reg.status === RegistrationStatus.Pending ? (
                 <>
                   <Button size="sm" onClick={() => onAccept(reg)} disabled={busyId === reg.id}>
                     <Check size={16} />
@@ -294,7 +267,7 @@ export default function Registrations() {
                     {reviewing.size ?? '—'}
                   </div>
                 </div>
-                {reviewing.status === 'Rejected' && reviewing.reviewNote && (
+                {reviewing.status === RegistrationStatus.Rejected && reviewing.reviewNote && (
                   <div className="col-span-2 min-w-0">
                     <div className="text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
                       Rejection Reason
@@ -315,7 +288,7 @@ export default function Registrations() {
               </div>
               {error && <div className="mt-3 text-sm font-medium text-danger">{error}</div>}
             </div>
-            {reviewing.status === 'Pending' ? (
+            {reviewing.status === RegistrationStatus.Pending ? (
               <div className="flex justify-end gap-3 border-t border-line-soft px-[26px] py-[18px]">
                 <Button variant="secondary" onClick={() => openReject(reviewing)}>
                   Reject

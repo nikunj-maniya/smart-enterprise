@@ -1,4 +1,5 @@
 import argon2 from 'argon2';
+import { TenantStatus, UserStatus } from '@prisma/client';
 import type { AuthUser, LoginResponse } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
@@ -23,9 +24,9 @@ function toAuthUser(u: {
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
   if (!user) throw new HttpError(401, 'Invalid email or password');
-  if (user.status !== 'Active') {
+  if (user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
     throw new HttpError(403, 'Account is not active');
   }
   const ok = await argon2.verify(user.passwordHash, password);
@@ -70,8 +71,10 @@ export async function refresh(refreshToken: string) {
   } catch {
     throw new HttpError(401, 'Invalid or expired refresh token');
   }
-  const user = await prisma.user.findUnique({ where: { id: payload.sub } });
-  if (!user || user.status !== 'Active') throw new HttpError(401, 'User not found or inactive');
+  const user = await prisma.user.findUnique({ where: { id: payload.sub }, include: { tenant: true } });
+  if (!user || user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
+    throw new HttpError(401, 'User not found or inactive');
+  }
   return {
     accessToken: signAccessToken(user.id),
     refreshToken: signRefreshToken(user.id),

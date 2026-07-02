@@ -11,13 +11,13 @@
 - [x] 2.2 Build the public registration form + submitted-confirmation screen _(Slice 2)_
 - [x] 2.3 System Admin Accept: atomically activate enterprise + admin account _(Slice 2)_
 - [x] 2.4 System Admin Reject: capture reason; rejected email is permanently blocked from re-registration _(Slice 2)_
-- [ ] 2.5 Suspend / Reactivate an enterprise _(Slice 4)_
+- [x] 2.5 Suspend / Reactivate an enterprise _(Slice 4)_
 - [x] 2.6 Build the Registrations queue (Pending/All tabs), review modal, and reject-reason modal _(Slice 2)_
 
 ## 3. System Admin Console
 
 - [x] 3.1 Overview dashboard: pending/active/users/suspended counts, latest registrations, recent activity _(Slice 3)_
-- [ ] 3.2 Enterprises list with Suspend/Reactivate actions
+- [x] 3.2 Enterprises list with Suspend/Reactivate actions _(Slice 4)_
 - [ ] 3.3 Platform Users read-only cross-enterprise view
 - [ ] 3.4 Immutable Audit Log view
 - [ ] 3.5 Platform Settings: persist and enforce the three toggles (not display-only)
