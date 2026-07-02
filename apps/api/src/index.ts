@@ -9,6 +9,7 @@ import { notificationsRouter } from './modules/notifications/notifications.route
 import { enterprisesRouter } from './modules/enterprises/enterprises.routes.js';
 import { usersRouter } from './modules/users/users.routes.js';
 import { auditLogRouter } from './modules/audit-log/audit-log.routes.js';
+import { settingsRouter } from './modules/settings/settings.routes.js';
 import { errorHandler } from './middleware/error.js';
 
 const app = express();
@@ -31,6 +32,7 @@ app.use('/notifications', notificationsRouter);
 app.use('/enterprises', enterprisesRouter);
 app.use('/users', usersRouter);
 app.use('/audit-log', auditLogRouter);
+app.use('/settings', settingsRouter);
 
 app.use(errorHandler);
 
