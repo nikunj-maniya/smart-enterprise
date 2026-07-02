@@ -9,6 +9,7 @@ import type {
 import { AuditAction, RegistrationStatus } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
+import { getSettings } from '../settings/settings.service.js';
 
 function toDto(reg: {
   id: string;
@@ -39,6 +40,11 @@ function toDto(reg: {
 export async function submitRegistration(
   input: RegisterEnterpriseRequest,
 ): Promise<{ id: string }> {
+  const settings = await getSettings();
+  if (!settings.allowPublicRegistration) {
+    throw new HttpError(403, 'Public enterprise registration is currently disabled.');
+  }
+
   const existing = await prisma.user.findUnique({ where: { email: input.contactEmail } });
   if (existing) {
     if (existing.status === UserStatus.Inactive) {
@@ -60,6 +66,7 @@ export async function submitRegistration(
         passwordHash,
         status: UserStatus.Pending,
         isSystemAdmin: false,
+        mustChangePassword: settings.forcePasswordChangeOnFirstLogin,
       },
     });
     const reg = await tx.enterpriseRegistration.create({
@@ -76,17 +83,19 @@ export async function submitRegistration(
       },
     });
 
-    const admins = await tx.user.findMany({ where: { isSystemAdmin: true }, select: { id: true } });
-    if (admins.length > 0) {
-      await tx.notification.createMany({
-        data: admins.map((admin) => ({
-          tenantId: tenant.id,
-          userId: admin.id,
-          type: 'enterprise_registered',
-          payload: { registrationId: reg.id, companyName: input.companyName },
-          read: false,
-        })),
-      });
+    if (settings.notifyOnNewRegistration) {
+      const admins = await tx.user.findMany({ where: { isSystemAdmin: true }, select: { id: true } });
+      if (admins.length > 0) {
+        await tx.notification.createMany({
+          data: admins.map((admin) => ({
+            tenantId: tenant.id,
+            userId: admin.id,
+            type: 'enterprise_registered',
+            payload: { registrationId: reg.id, companyName: input.companyName },
+            read: false,
+          })),
+        });
+      }
     }
 
     return reg;

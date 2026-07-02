@@ -257,3 +257,18 @@ export const auditLogResponseSchema = z.object({
   pageSize: z.number(),
 });
 export type AuditLogResponse = z.infer<typeof auditLogResponseSchema>;
+
+// ── Platform settings ─────────────────────────────────────────
+export const platformSettingsSchema = z.object({
+  forcePasswordChangeOnFirstLogin: z.boolean(),
+  allowPublicRegistration: z.boolean(),
+  notifyOnNewRegistration: z.boolean(),
+});
+export type PlatformSettings = z.infer<typeof platformSettingsSchema>;
+
+export const updatePlatformSettingsSchema = z.object({
+  forcePasswordChangeOnFirstLogin: z.boolean().optional(),
+  allowPublicRegistration: z.boolean().optional(),
+  notifyOnNewRegistration: z.boolean().optional(),
+});
+export type UpdatePlatformSettingsRequest = z.infer<typeof updatePlatformSettingsSchema>;

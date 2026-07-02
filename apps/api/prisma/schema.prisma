@@ -363,3 +363,13 @@ model AuditLog {
 
   @@index([tenantId])
 }
+
+// Singleton table — exactly one row (id = "singleton"), application-managed.
+model PlatformSettings {
+  id                              String   @id @default("singleton")
+  forcePasswordChangeOnFirstLogin Boolean  @default(true)
+  allowPublicRegistration         Boolean  @default(true)
+  notifyOnNewRegistration         Boolean  @default(true)
+  updatedAt                       DateTime @updatedAt
+  updatedBy                       String?
+}

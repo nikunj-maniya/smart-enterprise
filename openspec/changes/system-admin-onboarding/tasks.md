@@ -20,7 +20,7 @@
 - [x] 3.2 Enterprises list with Suspend/Reactivate actions _(Slice 4)_
 - [x] 3.3 Platform Users read-only cross-enterprise view _(Slice 5)_
 - [x] 3.4 Immutable Audit Log view _(Slice 6)_
-- [ ] 3.5 Platform Settings: persist and enforce the three toggles (not display-only)
+- [x] 3.5 Platform Settings: persist and enforce the three toggles (not display-only) _(Slice 7)_
 
 ## 4. Verify
 
