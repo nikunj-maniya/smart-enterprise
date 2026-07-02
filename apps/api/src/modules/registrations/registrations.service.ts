@@ -1,9 +1,7 @@
 import argon2 from 'argon2';
-import type {
-  EnterpriseRegistrationDto,
-  RegisterEnterpriseRequest,
-  RegistrationStatus,
-} from '@se/shared';
+import { TenantStatus, UserStatus } from '@prisma/client';
+import type { EnterpriseRegistrationDto, RegisterEnterpriseRequest } from '@se/shared';
+import { AuditAction, RegistrationStatus } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 
@@ -38,7 +36,7 @@ export async function submitRegistration(
 ): Promise<{ id: string }> {
   const existing = await prisma.user.findUnique({ where: { email: input.contactEmail } });
   if (existing) {
-    if (existing.status === 'Inactive') {
+    if (existing.status === UserStatus.Inactive) {
       throw new HttpError(409, 'This email was previously rejected and cannot be used again.');
     }
     throw new HttpError(409, 'This email is already registered.');
@@ -47,7 +45,7 @@ export async function submitRegistration(
   const passwordHash = await argon2.hash(input.password);
   const registration = await prisma.$transaction(async (tx) => {
     const tenant = await tx.tenant.create({
-      data: { name: input.companyName, status: 'Pending' },
+      data: { name: input.companyName, status: TenantStatus.Pending },
     });
     const user = await tx.user.create({
       data: {
@@ -55,7 +53,7 @@ export async function submitRegistration(
         name: input.contactName,
         email: input.contactEmail,
         passwordHash,
-        status: 'Pending',
+        status: UserStatus.Pending,
         isSystemAdmin: false,
       },
     });
@@ -69,7 +67,7 @@ export async function submitRegistration(
         size: input.size,
         industry: input.industry,
         website: input.website,
-        status: 'Pending',
+        status: RegistrationStatus.Pending,
       },
     });
 
@@ -108,14 +106,16 @@ export async function acceptRegistration(
 ): Promise<EnterpriseRegistrationDto> {
   const reg = await prisma.enterpriseRegistration.findUnique({ where: { id } });
   if (!reg) throw new HttpError(404, 'Registration not found');
-  if (reg.status !== 'Pending') throw new HttpError(409, 'Registration has already been reviewed');
+  if (reg.status !== RegistrationStatus.Pending) {
+    throw new HttpError(409, 'Registration has already been reviewed');
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
-    await tx.tenant.update({ where: { id: reg.tenantId }, data: { status: 'Active' } });
-    await tx.user.update({ where: { id: reg.userId }, data: { status: 'Active' } });
+    await tx.tenant.update({ where: { id: reg.tenantId }, data: { status: TenantStatus.Active } });
+    await tx.user.update({ where: { id: reg.userId }, data: { status: UserStatus.Active } });
     const updatedReg = await tx.enterpriseRegistration.update({
       where: { id },
-      data: { status: 'Accepted', reviewedBy: actorId },
+      data: { status: RegistrationStatus.Accepted, reviewedBy: actorId },
     });
     await tx.auditLog.create({
       data: {
@@ -123,9 +123,9 @@ export async function acceptRegistration(
         actorId,
         entity: 'Tenant',
         entityId: reg.tenantId,
-        action: 'accept',
-        before: { status: 'Pending' },
-        after: { status: 'Active' },
+        action: AuditAction.Accept,
+        before: { status: TenantStatus.Pending },
+        after: { status: TenantStatus.Active },
       },
     });
     return updatedReg;
@@ -141,14 +141,16 @@ export async function rejectRegistration(
 ): Promise<EnterpriseRegistrationDto> {
   const reg = await prisma.enterpriseRegistration.findUnique({ where: { id } });
   if (!reg) throw new HttpError(404, 'Registration not found');
-  if (reg.status !== 'Pending') throw new HttpError(409, 'Registration has already been reviewed');
+  if (reg.status !== RegistrationStatus.Pending) {
+    throw new HttpError(409, 'Registration has already been reviewed');
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
-    await tx.tenant.update({ where: { id: reg.tenantId }, data: { status: 'Rejected' } });
-    await tx.user.update({ where: { id: reg.userId }, data: { status: 'Inactive' } });
+    await tx.tenant.update({ where: { id: reg.tenantId }, data: { status: TenantStatus.Rejected } });
+    await tx.user.update({ where: { id: reg.userId }, data: { status: UserStatus.Inactive } });
     const updatedReg = await tx.enterpriseRegistration.update({
       where: { id },
-      data: { status: 'Rejected', reviewedBy: actorId, reviewNote: reason },
+      data: { status: RegistrationStatus.Rejected, reviewedBy: actorId, reviewNote: reason },
     });
     await tx.auditLog.create({
       data: {
@@ -156,9 +158,9 @@ export async function rejectRegistration(
         actorId,
         entity: 'Tenant',
         entityId: reg.tenantId,
-        action: 'reject',
-        before: { status: 'Pending' },
-        after: { status: 'Rejected', reason },
+        action: AuditAction.Reject,
+        before: { status: TenantStatus.Pending },
+        after: { status: TenantStatus.Rejected, reason },
       },
     });
     return updatedReg;

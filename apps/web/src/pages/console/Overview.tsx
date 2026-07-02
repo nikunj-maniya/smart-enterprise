@@ -1,21 +1,42 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, Building2, Users, PauseCircle, CheckCircle, XCircle } from 'lucide-react';
+import { Clock, Building2, Users, PauseCircle, PlayCircle, CheckCircle, XCircle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { OverviewResponse, RegistrationStatus, AuditAction } from '@se/shared';
+import {
+  AuditAction,
+  RegistrationStatus,
+  type OverviewResponse,
+} from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { apiFetch } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/formatRelativeTime';
 
 const STATUS_STYLE: Record<RegistrationStatus, { bg: string; fg: string; dot: string; label: string }> = {
-  Pending: { bg: 'rgb(255,247,237)', fg: 'rgb(204,78,0)', dot: 'rgb(247,107,21)', label: 'Pending' },
-  Accepted: { bg: 'rgb(233,246,233)', fg: 'rgb(33,131,88)', dot: 'rgb(70,167,88)', label: 'Accepted' },
-  Rejected: { bg: 'rgb(254,235,236)', fg: 'rgb(206,44,49)', dot: 'rgb(229,72,77)', label: 'Rejected' },
+  [RegistrationStatus.Pending]: {
+    bg: 'rgb(255,247,237)',
+    fg: 'rgb(204,78,0)',
+    dot: 'rgb(247,107,21)',
+    label: 'Pending',
+  },
+  [RegistrationStatus.Accepted]: {
+    bg: 'rgb(233,246,233)',
+    fg: 'rgb(33,131,88)',
+    dot: 'rgb(70,167,88)',
+    label: 'Accepted',
+  },
+  [RegistrationStatus.Rejected]: {
+    bg: 'rgb(254,235,236)',
+    fg: 'rgb(206,44,49)',
+    dot: 'rgb(229,72,77)',
+    label: 'Rejected',
+  },
 };
 
 const ACTIVITY_STYLE: Record<AuditAction, { label: string; icon: LucideIcon }> = {
-  accept: { label: 'Accepted registration', icon: CheckCircle },
-  reject: { label: 'Rejected registration', icon: XCircle },
+  [AuditAction.Accept]: { label: 'Accepted registration', icon: CheckCircle },
+  [AuditAction.Reject]: { label: 'Rejected registration', icon: XCircle },
+  [AuditAction.Suspend]: { label: 'Suspended enterprise', icon: PauseCircle },
+  [AuditAction.Reactivate]: { label: 'Reactivated enterprise', icon: PlayCircle },
 };
 
 const STAT_TONES = {
