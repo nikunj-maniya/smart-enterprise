@@ -10,3 +10,11 @@ export async function list(req: Request, res: Response, next: NextFunction) {
     next(err);
   }
 }
+
+export async function resetPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    res.json(await usersService.adminResetPassword(req.params.id, req.user!.id));
+  } catch (err) {
+    next(err);
+  }
+}

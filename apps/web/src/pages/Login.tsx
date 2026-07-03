@@ -116,9 +116,12 @@ export default function Login() {
 
           {error && <div className="mt-4 text-sm font-medium text-danger">{error}</div>}
 
-          <div className="mt-[10px] cursor-pointer text-right text-[13px] font-semibold text-brand-hover">
+          <Link
+            to="/forgot-password"
+            className="mt-[10px] block text-right text-[13px] font-semibold text-brand-hover"
+          >
             Forgot password?
-          </div>
+          </Link>
 
           <div className="mt-[22px]">
             <Button type="submit" size="lg" fullWidth className="h-12" disabled={busy}>

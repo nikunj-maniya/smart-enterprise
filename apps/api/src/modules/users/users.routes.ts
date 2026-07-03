@@ -5,3 +5,4 @@ import * as usersController from './users.controller.js';
 export const usersRouter: Router = Router();
 
 usersRouter.get('/', requireAuth, requireSystemAdmin, usersController.list);
+usersRouter.post('/:id/reset-password', requireAuth, requireSystemAdmin, usersController.resetPassword);

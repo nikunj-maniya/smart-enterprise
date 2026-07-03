@@ -29,6 +29,23 @@ export const changePasswordRequestSchema = z.object({
 });
 export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
 
+export const forgotPasswordRequestSchema = z.object({
+  email: z.string().email(),
+});
+export type ForgotPasswordRequest = z.infer<typeof forgotPasswordRequestSchema>;
+
+export const resetPasswordRequestSchema = z.object({
+  token: z.string().min(1, 'Token is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+export type ResetPasswordRequest = z.infer<typeof resetPasswordRequestSchema>;
+
+/** Response for the System Admin's admin-initiated reset (no email fallback, D-30). */
+export const adminResetPasswordResponseSchema = z.object({
+  temporaryPassword: z.string(),
+});
+export type AdminResetPasswordResponse = z.infer<typeof adminResetPasswordResponseSchema>;
+
 /** Authenticated user shape returned to the client (no password hash). */
 export const authUserSchema = z.object({
   id: z.string(),

@@ -1,5 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
-import { loginRequestSchema, changePasswordRequestSchema } from '@se/shared';
+import {
+  loginRequestSchema,
+  changePasswordRequestSchema,
+  forgotPasswordRequestSchema,
+  resetPasswordRequestSchema,
+} from '@se/shared';
 import { HttpError } from '../../lib/http-error.js';
 import * as authService from './auth.service.js';
 
@@ -24,6 +29,26 @@ export async function changePassword(req: Request, res: Response, next: NextFunc
   try {
     const { currentPassword, newPassword } = changePasswordRequestSchema.parse(req.body);
     res.json(await authService.changePassword(req.user!.id, currentPassword, newPassword));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function forgotPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { email } = forgotPasswordRequestSchema.parse(req.body);
+    await authService.requestPasswordReset(email);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { token, newPassword } = resetPasswordRequestSchema.parse(req.body);
+    await authService.resetPassword(token, newPassword);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
