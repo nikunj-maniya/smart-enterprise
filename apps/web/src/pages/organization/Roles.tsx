@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Search, PencilLine, Plus, Check, ShieldCheck, Lock } from 'lucide-react';
+import { Search, PencilLine, Plus, Check, ShieldCheck, Lock, Trash2 } from 'lucide-react';
 import {
   PERMISSION_CATALOG,
   permissionScopeSummary,
@@ -191,6 +191,9 @@ export default function Roles() {
   const [type, setType] = React.useState<TypeFilter>('');
   const [editing, setEditing] = React.useState<RoleDto | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<RoleDto | null>(null);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
 
   React.useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -223,6 +226,26 @@ export default function Roles() {
     setEditing(null);
     setCreating(false);
     load();
+  }
+
+  function openDelete(role: RoleDto) {
+    setDeleting(role);
+    setDeleteError(null);
+  }
+
+  async function onConfirmDelete() {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await apiFetch(`/roles/${deleting.id}`, { method: 'DELETE' });
+      setDeleting(null);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Unable to delete the role.');
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   const GRID = 'grid-cols-[1.4fr_2.4fr_0.8fr_0.8fr_0.8fr]';
@@ -298,11 +321,21 @@ export default function Roles() {
             <span>
               <TypeBadge isSystem={role.isSystem} />
             </span>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => setEditing(role)}>
                 <PencilLine size={14} />
                 Edit
               </Button>
+              {!role.isSystem && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => openDelete(role)}
+                  aria-label={`Delete ${role.name}`}
+                >
+                  <Trash2 size={14} className="text-danger" />
+                </Button>
+              )}
             </div>
           </div>
         ))}
@@ -349,6 +382,32 @@ export default function Roles() {
           }}
           onSaved={onSaved}
         />
+      )}
+
+      {deleting && (
+        <Overlay onClose={() => setDeleting(null)} z={70}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-danger/[0.12] text-danger">
+                <Trash2 size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Delete role</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Delete <strong>{deleting.name}</strong>? This can&apos;t be undone. A role that&apos;s
+              still assigned to members can&apos;t be deleted.
+            </div>
+            {deleteError && <div className="mt-3 text-sm font-medium text-danger">{deleteError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setDeleting(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={onConfirmDelete} disabled={deleteBusy}>
+                {deleteBusy ? 'Deleting…' : 'Delete role'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
       )}
     </>
   );

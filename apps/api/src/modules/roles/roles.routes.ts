@@ -8,3 +8,4 @@ rolesRouter.use(requireAuth, requireEnterpriseAdmin);
 rolesRouter.get('/', rolesController.list);
 rolesRouter.post('/', rolesController.create);
 rolesRouter.put('/:id', rolesController.update);
+rolesRouter.delete('/:id', rolesController.remove);

@@ -132,3 +132,33 @@ export async function updateRole(
 
   return toDto(updated);
 }
+
+export async function deleteRole(tenantId: string, id: string, actorId: string): Promise<void> {
+  const existing = await prisma.role.findUnique({
+    where: { id },
+    include: { _count: { select: { users: true } } },
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new HttpError(404, 'Role not found');
+  if (existing.isSystem) throw new HttpError(409, 'System roles cannot be deleted');
+  if (existing._count.users > 0) {
+    const n = existing._count.users;
+    throw new HttpError(
+      409,
+      `This role is assigned to ${n} member${n === 1 ? '' : 's'}. Reassign them before deleting it.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.role.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'Role',
+        entityId: id,
+        action: 'delete',
+        before: { name: existing.name, permissions: existing.permissions },
+      },
+    });
+  });
+}

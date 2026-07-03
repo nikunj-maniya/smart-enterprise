@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Search, ChevronDown, Building, PencilLine, Plus, Check } from 'lucide-react';
+import { Search, Building, PencilLine, Plus, Check } from 'lucide-react';
 import type {
   CreateDepartmentRequest,
   DepartmentDto,
@@ -12,9 +12,8 @@ import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
-const NO_HEAD = '';
-
 function DepartmentCard({ dept, onEdit }: { dept: DepartmentDto; onEdit: () => void }) {
+  const headNames = dept.heads.map((h) => h.name).join(', ');
   return (
     <div className="rounded-[14px] border border-line-soft bg-surface p-5 shadow-card">
       <div className="flex items-center gap-3">
@@ -30,9 +29,11 @@ function DepartmentCard({ dept, onEdit }: { dept: DepartmentDto; onEdit: () => v
           <PencilLine size={16} />
         </button>
       </div>
-      <div className="mt-4 flex justify-between text-[13px]">
-        <span className="text-ink-400">Department head</span>
-        <span className="font-semibold text-ink-700">{dept.headName ?? '—'}</span>
+      <div className="mt-4 flex justify-between gap-3 text-[13px]">
+        <span className="flex-none text-ink-400">
+          {dept.heads.length > 1 ? 'Department heads' : 'Department head'}
+        </span>
+        <span className="truncate text-right font-semibold text-ink-700">{headNames || '—'}</span>
       </div>
       <div className="mt-2 flex justify-between text-[13px]">
         <span className="text-ink-400">Members</span>
@@ -54,16 +55,27 @@ function DepartmentModal({
   onSaved: (dept: DepartmentDto) => void;
 }) {
   const [name, setName] = React.useState(department?.name ?? '');
-  const [headUserId, setHeadUserId] = React.useState(department?.headUserId ?? NO_HEAD);
+  const [headIds, setHeadIds] = React.useState<Set<string>>(
+    new Set(department?.heads.map((h) => h.id) ?? []),
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+
+  function toggleHead(id: string) {
+    setHeadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function onSave() {
     setError(null);
     if (!name.trim()) return setError('Department name is required.');
     setBusy(true);
     try {
-      const body: CreateDepartmentRequest = { name, headUserId: headUserId || null };
+      const body: CreateDepartmentRequest = { name, headUserIds: [...headIds] };
       const dept = department
         ? await apiFetch<DepartmentDto>(`/departments/${department.id}`, {
             method: 'PUT',
@@ -107,26 +119,40 @@ function DepartmentModal({
             </div>
           </label>
 
-          <label className="flex flex-col gap-2">
-            <span className="text-sm font-semibold text-ink-900">Department head</span>
-            <div className="relative flex items-center">
-              <select
-                value={headUserId}
-                onChange={(e) => setHeadUserId(e.target.value)}
-                className={`h-11 w-full appearance-none rounded-sm border border-line bg-surface py-0 pl-3 pr-9 text-sm outline-none ${
-                  headUserId ? 'text-ink-900' : 'text-ink-300'
-                }`}
-              >
-                <option value={NO_HEAD}>No head assigned</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id} className="text-ink-900">
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={18} className="pointer-events-none absolute right-3 text-ink-400" />
-            </div>
-          </label>
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-semibold text-ink-900">
+              Department heads
+              <span className="ml-1 font-normal text-ink-400">— select one or more</span>
+            </span>
+            {users.length === 0 ? (
+              <div className="rounded-sm border border-dashed border-line bg-app-bg px-3 py-4 text-center text-[13px] text-ink-400">
+                No members yet. Add users first, then assign heads.
+              </div>
+            ) : (
+              <div className="max-h-[220px] overflow-y-auto rounded-sm border border-line">
+                {users.map((u) => {
+                  const checked = headIds.has(u.id);
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => toggleHead(u.id)}
+                      className="flex w-full items-center gap-[10px] border-b border-line-soft px-3 py-[9px] text-left last:border-b-0 hover:bg-surface-muted"
+                    >
+                      <span
+                        className={`flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[5px] border ${
+                          checked ? 'border-brand bg-brand text-white' : 'border-line bg-surface'
+                        }`}
+                      >
+                        {checked && <Check size={13} strokeWidth={3} />}
+                      </span>
+                      <span className="text-sm text-ink-900">{u.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {error && <div className="mt-4 text-sm font-medium text-danger">{error}</div>}

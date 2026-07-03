@@ -429,11 +429,13 @@ export const updatePlatformSettingsSchema = z.object({
 });
 
 // ── Departments master (org-masters) ───────────────────────────
+export const departmentHeadSchema = z.object({ id: z.string(), name: z.string() });
+export type DepartmentHeadDto = z.infer<typeof departmentHeadSchema>;
+
 export const departmentSchema = z.object({
   id: z.string(),
   name: z.string(),
-  headUserId: z.string().nullable(),
-  headName: z.string().nullable(),
+  heads: z.array(departmentHeadSchema),
   memberCount: z.number(),
 });
 export type DepartmentDto = z.infer<typeof departmentSchema>;
@@ -455,7 +457,7 @@ export type DepartmentsResponse = z.infer<typeof departmentsResponseSchema>;
 
 export const createDepartmentRequestSchema = z.object({
   name: z.string().min(1, 'Department name is required'),
-  headUserId: z.string().nullable().optional(),
+  headUserIds: z.array(z.string()).default([]),
 });
 export type CreateDepartmentRequest = z.infer<typeof createDepartmentRequestSchema>;
 
