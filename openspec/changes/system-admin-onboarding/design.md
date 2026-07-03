@@ -33,3 +33,4 @@ Builds directly on `setup-foundation`. The design's completed screens cover the 
 
 <!-- none — the change-password flow and settings behaviour are resolved above -->
 - The design has no dedicated Change Password screen; it is added in this change per the resolved decision above.
+- The design's forgot-password flow stops at "check your email" — there is no screen for entering the new password from the emailed link. Resolved (2026-07-03): a token-based Set New Password screen is added in Slice 8, styled to match the existing auth cards.

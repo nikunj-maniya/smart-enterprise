@@ -2,8 +2,8 @@
 
 - [x] 1.1 Add email/password login (argon2 verify) issuing JWT access + refresh tokens _(Slice 0)_
 - [x] 1.2 On login with the backend `resetPassword` flag, route to Change Password; on success persist and clear the flag _(Slice 0)_
-- [ ] 1.3 Add password reset: self-service link (where email enabled) + admin-initiated fallback _(Slice 8)_
-- [~] 1.4 Build login, forgot-password, reset confirmation, and Change Password screens — login + Change Password done _(Slice 0)_; forgot/reset screens _(Slice 8)_
+- [ ] 1.3 Add password reset: self-service link (where email enabled) + admin-initiated fallback; the emailed link opens a token-based Set New Password screen _(Slice 8)_
+- [~] 1.4 Build login, forgot-password, reset confirmation, and token-based Set New Password screens — login + Change Password done _(Slice 0)_; forgot/reset/set-new-password screens _(Slice 8)_. The prototype has no Set New Password screen — build it matching the existing auth-card style (decision, 2026-07-03)
 
 ## 2. Enterprise Onboarding
 
