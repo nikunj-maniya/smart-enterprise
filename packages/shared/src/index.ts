@@ -50,6 +50,108 @@ export const DEFAULT_DEPARTMENT_NAMES = [
   'Other',
 ] as const;
 
+/**
+ * Fixed permission catalog — PRD §4.4. Roles are bundles that store a subset of
+ * these keys (design.md decision). Custom permission *types* need engineering;
+ * custom bundles don't. Grouped for the role-editor UI.
+ */
+export const PermissionKey = {
+  ViewAllForms: 'view_all_forms',
+  SubmitRequest: 'submit_request',
+  ApproveAssigned: 'approve_assigned',
+  ApproveLeaveOver2Days: 'approve_leave_over_2_days',
+  ApproveVisitor: 'approve_visitor',
+  FulfilItRequest: 'fulfil_it_request',
+  CheckVisitor: 'check_visitor',
+  ManageLeaveQuotas: 'manage_leave_quotas',
+  ConfigureForms: 'configure_forms',
+  ManageOrg: 'manage_org',
+} as const;
+export type PermissionKey = (typeof PermissionKey)[keyof typeof PermissionKey];
+
+export interface PermissionGroup {
+  group: string;
+  permissions: { key: PermissionKey; label: string }[];
+}
+
+export const PERMISSION_CATALOG: PermissionGroup[] = [
+  {
+    group: 'General',
+    permissions: [
+      { key: PermissionKey.ViewAllForms, label: 'View all form types' },
+      { key: PermissionKey.SubmitRequest, label: 'Submit a request' },
+    ],
+  },
+  {
+    group: 'Approvals',
+    permissions: [
+      { key: PermissionKey.ApproveAssigned, label: 'Approve where assigned' },
+      { key: PermissionKey.ApproveLeaveOver2Days, label: 'Approve leave / WFH over 2 days' },
+      { key: PermissionKey.ApproveVisitor, label: 'Approve visitor gadgets / entry' },
+      { key: PermissionKey.FulfilItRequest, label: 'Fulfil IT requests' },
+      { key: PermissionKey.CheckVisitor, label: 'Check visitors in / out' },
+    ],
+  },
+  {
+    group: 'Administration',
+    permissions: [
+      { key: PermissionKey.ManageLeaveQuotas, label: 'Manage leave quotas' },
+      { key: PermissionKey.ConfigureForms, label: 'Configure forms / routing' },
+      { key: PermissionKey.ManageOrg, label: 'Manage users, roles & departments' },
+    ],
+  },
+];
+
+export const ALL_PERMISSION_KEYS: PermissionKey[] = PERMISSION_CATALOG.flatMap((g) =>
+  g.permissions.map((p) => p.key),
+);
+
+export const PERMISSION_LABELS: Record<PermissionKey, string> = Object.fromEntries(
+  PERMISSION_CATALOG.flatMap((g) => g.permissions.map((p) => [p.key, p.label])),
+) as Record<PermissionKey, string>;
+
+/** Default permission set seeded onto each System role — the PRD §4.4 matrix. */
+export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleKey, PermissionKey[]> = {
+  [SystemRoleKey.Employee]: [PermissionKey.ViewAllForms, PermissionKey.SubmitRequest],
+  [SystemRoleKey.ProjectManager]: [
+    PermissionKey.ViewAllForms,
+    PermissionKey.SubmitRequest,
+    PermissionKey.ApproveAssigned,
+  ],
+  [SystemRoleKey.TechLead]: [
+    PermissionKey.ViewAllForms,
+    PermissionKey.SubmitRequest,
+    PermissionKey.ApproveAssigned,
+  ],
+  [SystemRoleKey.HrHead]: [
+    PermissionKey.ViewAllForms,
+    PermissionKey.SubmitRequest,
+    PermissionKey.ApproveAssigned,
+    PermissionKey.ApproveLeaveOver2Days,
+    PermissionKey.CheckVisitor,
+    PermissionKey.ManageLeaveQuotas,
+  ],
+  [SystemRoleKey.ProcessHead]: [
+    PermissionKey.ViewAllForms,
+    PermissionKey.SubmitRequest,
+    PermissionKey.ApproveAssigned,
+    PermissionKey.ApproveVisitor,
+  ],
+  [SystemRoleKey.ItAdmin]: [
+    PermissionKey.ViewAllForms,
+    PermissionKey.SubmitRequest,
+    PermissionKey.FulfilItRequest,
+  ],
+  [SystemRoleKey.EnterpriseAdmin]: [
+    PermissionKey.ViewAllForms,
+    PermissionKey.SubmitRequest,
+    PermissionKey.CheckVisitor,
+    PermissionKey.ManageLeaveQuotas,
+    PermissionKey.ConfigureForms,
+    PermissionKey.ManageOrg,
+  ],
+};
+
 // ── Auth ───────────────────────────────────────────────────
 export const loginRequestSchema = z.object({
   email: z.string().email(),
@@ -367,3 +469,52 @@ export const orgUserPickerSchema = z.object({
 });
 export type OrgUserPickerDto = z.infer<typeof orgUserPickerSchema>;
 export type UpdatePlatformSettingsRequest = z.infer<typeof updatePlatformSettingsSchema>;
+
+// ── Roles & permissions master (org-masters) ───────────────────
+const permissionKeyList = z
+  .array(z.string())
+  .refine((keys) => keys.every((k) => (ALL_PERMISSION_KEYS as string[]).includes(k)), {
+    message: 'Unknown permission key',
+  });
+
+export const roleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  isSystem: z.boolean(),
+  permissions: z.array(z.string()),
+  memberCount: z.number(),
+});
+export type RoleDto = z.infer<typeof roleSchema>;
+
+export const rolesQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().optional(),
+  type: z.enum(['system', 'custom']).optional(),
+});
+export type RolesQuery = z.infer<typeof rolesQuerySchema>;
+
+export const rolesResponseSchema = z.object({
+  rows: z.array(roleSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type RolesResponse = z.infer<typeof rolesResponseSchema>;
+
+export const createRoleRequestSchema = z.object({
+  name: z.string().min(1, 'Role name is required'),
+  permissions: permissionKeyList,
+});
+export type CreateRoleRequest = z.infer<typeof createRoleRequestSchema>;
+
+export const updateRoleRequestSchema = createRoleRequestSchema;
+export type UpdateRoleRequest = z.infer<typeof updateRoleRequestSchema>;
+
+/** Human-readable summary of a role's permission bundle for the "Scope" column. */
+export function permissionScopeSummary(permissions: string[]): string {
+  if (permissions.length === 0) return 'No permissions';
+  const labels = permissions.map((p) => PERMISSION_LABELS[p as PermissionKey] ?? p);
+  if (labels.length <= 3) return labels.join(' · ');
+  return `${labels.slice(0, 3).join(' · ')} +${labels.length - 3} more`;
+}

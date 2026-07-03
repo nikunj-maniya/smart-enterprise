@@ -12,9 +12,9 @@
 
 ## 3. Roles & Permissions Master
 
-- [ ] 3.1 Permission catalog constant (PRD §4.4) + tenant-scoped Role CRUD API (System roles undeletable, audited) _(Slice 3)_
-- [ ] 3.2 Roles page: table (Role, Scope, Members, System/Custom badge, Edit), search, filters, pagination _(Slice 3)_
-- [ ] 3.3 Role create/edit modal with permission-bundle selection _(Slice 3)_
+- [x] 3.1 Permission catalog constant (PRD §4.4) + tenant-scoped Role create/list/update API, audited _(Slice 3)_. System roles get an `isSystem` flag + the §4.4 permission bundle seeded (backfilled for existing tenants); they're renamable but their permissions are fixed. Delete deferred to Slice 7 — consistent with Departments (prototype has no delete on any master).
+- [x] 3.2 Roles page: table (Role, Scope, Members, Type badge, Edit), search, System/Custom filter chips, pagination _(Slice 3)_. "Scope" column renders a derived summary of the role's permission bundle (the prototype's free-text scope is superseded by the design.md catalog+bundle decision).
+- [x] 3.3 Role create/edit modal with permission-bundle selection _(Slice 3)_. Grouped permission checklist (General/Approvals/Administration per §4.4) replaces the prototype mock's free-text scope + editable members number — the mock predates the design.md "roles are bundles storing a subset of a fixed catalog" decision; Members is a real computed count, not an input.
 
 ## 4. User Master
 

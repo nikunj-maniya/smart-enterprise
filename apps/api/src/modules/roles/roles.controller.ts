@@ -1,0 +1,37 @@
+import type { Request, Response, NextFunction } from 'express';
+import { createRoleRequestSchema, rolesQuerySchema, updateRoleRequestSchema } from '@se/shared';
+import * as rolesService from './roles.service.js';
+
+export async function list(req: Request, res: Response, next: NextFunction) {
+  try {
+    const query = rolesQuerySchema.parse(req.query);
+    res.json(await rolesService.listRoles(req.user!.tenantId!, query));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function create(req: Request, res: Response, next: NextFunction) {
+  try {
+    const input = createRoleRequestSchema.parse(req.body);
+    const role = await rolesService.createRole(req.user!.tenantId!, req.user!.id, input);
+    res.status(201).json(role);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function update(req: Request, res: Response, next: NextFunction) {
+  try {
+    const input = updateRoleRequestSchema.parse(req.body);
+    const role = await rolesService.updateRole(
+      req.user!.tenantId!,
+      req.params.id,
+      req.user!.id,
+      input,
+    );
+    res.json(role);
+  } catch (err) {
+    next(err);
+  }
+}

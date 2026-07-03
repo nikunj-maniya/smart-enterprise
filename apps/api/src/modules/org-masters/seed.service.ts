@@ -3,6 +3,7 @@ import {
   DEFAULT_DEPARTMENT_NAMES,
   SYSTEM_ROLE_KEYS,
   SYSTEM_ROLE_NAMES,
+  SYSTEM_ROLE_PERMISSIONS,
   SystemRoleKey,
 } from '@se/shared';
 
@@ -13,10 +14,19 @@ import {
  */
 export async function seedTenantOrgDefaults(tx: Prisma.TransactionClient, tenantId: string) {
   for (const key of SYSTEM_ROLE_KEYS) {
+    // System roles carry a fixed §4.4 permission set. The update path also enforces it
+    // so the backfill script corrects tenants seeded before this slice (name kept editable
+    // by admins, but the seeder is the source of truth for isSystem + the baseline bundle).
     await tx.role.upsert({
       where: { tenantId_key: { tenantId, key } },
-      update: {},
-      create: { tenantId, key, name: SYSTEM_ROLE_NAMES[key], permissions: [] },
+      update: { isSystem: true, permissions: SYSTEM_ROLE_PERMISSIONS[key] },
+      create: {
+        tenantId,
+        key,
+        name: SYSTEM_ROLE_NAMES[key],
+        isSystem: true,
+        permissions: SYSTEM_ROLE_PERMISSIONS[key],
+      },
     });
   }
 

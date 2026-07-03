@@ -128,6 +128,7 @@ model Role {
   key         String
   name        String
   permissions String[]
+  isSystem    Boolean  @default(false) // seeded System roles: renamable, permissions fixed, undeletable
 
   tenant Tenant     @relation(fields: [tenantId], references: [id])
   users  UserRole[]
