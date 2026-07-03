@@ -12,6 +12,11 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+const withRolesAndTenant = {
+  tenant: true,
+  roles: { include: { role: true } },
+} as const;
+
 function toAuthUser(u: {
   id: string;
   name: string;
@@ -19,6 +24,8 @@ function toAuthUser(u: {
   isSystemAdmin: boolean;
   mustChangePassword: boolean;
   tenantId: string | null;
+  tenant: { name: string } | null;
+  roles: { role: { key: string } }[];
 }): AuthUser {
   return {
     id: u.id,
@@ -27,11 +34,13 @@ function toAuthUser(u: {
     isSystemAdmin: u.isSystemAdmin,
     mustChangePassword: u.mustChangePassword,
     tenantId: u.tenantId,
+    tenantName: u.tenant?.name ?? null,
+    roles: u.roles.map((ur) => ur.role.key),
   };
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
-  const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
+  const user = await prisma.user.findUnique({ where: { email }, include: withRolesAndTenant });
   if (!user) throw new HttpError(401, 'Invalid email or password');
   if (user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
     throw new HttpError(403, 'Account is not active');
@@ -47,7 +56,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
 }
 
 export async function getMe(userId: string): Promise<AuthUser> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: withRolesAndTenant });
   if (!user) throw new HttpError(404, 'User not found');
   return toAuthUser(user);
 }
@@ -67,6 +76,7 @@ export async function changePassword(
   const updated = await prisma.user.update({
     where: { id: userId },
     data: { passwordHash, mustChangePassword: false },
+    include: withRolesAndTenant,
   });
   return toAuthUser(updated);
 }

@@ -1,8 +1,8 @@
 ## 1. Console Shell & Navigation
 
-- [ ] 1.1 Derive sidebar sections from the union of the logged-in user's roles (drop the prototype's workspace switcher) _(Slice 1)_
-- [ ] 1.2 Add the Organization/Configuration sidebar sections + admin route guards (Enterprise Admin role, active tenant) _(Slice 1)_
-- [ ] 1.3 Seed System roles + default departments in the accept transaction, with a backfill for already-active tenants _(Slice 1)_
+- [x] 1.1 Derive sidebar sections from the union of the logged-in user's roles (drop the prototype's workspace switcher) _(Slice 1)_
+- [x] 1.2 Add the Organization sidebar section + admin route guards (Enterprise Admin role, active tenant) _(Slice 1)_. Configuration section (Leave Policy/Form Builder/Slack) deferred to the changes that own those pages.
+- [x] 1.3 Seed System roles + default departments in the accept transaction, with a backfill for already-active tenants _(Slice 1)_
 
 ## 2. Departments Master
 

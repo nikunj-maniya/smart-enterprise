@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { TenantStatus, UserStatus } from '@prisma/client';
+import { SystemRoleKey } from '@se/shared';
 import { prisma } from '../prisma.js';
 import { verifyAccessToken } from '../lib/jwt.js';
 import { HttpError } from '../lib/http-error.js';
@@ -9,6 +10,7 @@ export interface AuthedUser {
   email: string;
   isSystemAdmin: boolean;
   tenantId: string | null;
+  roles: string[];
 }
 
 declare global {
@@ -29,7 +31,10 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
     const token = header.slice('Bearer '.length);
     const payload = verifyAccessToken(token);
-    const user = await prisma.user.findUnique({ where: { id: payload.sub }, include: { tenant: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { tenant: true, roles: { include: { role: true } } },
+    });
     if (!user || user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
       throw new HttpError(401, 'User not found or inactive');
     }
@@ -38,6 +43,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
       email: user.email,
       isSystemAdmin: user.isSystemAdmin,
       tenantId: user.tenantId,
+      roles: user.roles.map((ur) => ur.role.key),
     };
     next();
   } catch (err) {
@@ -50,6 +56,14 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
 export function requireSystemAdmin(req: Request, _res: Response, next: NextFunction) {
   if (!req.user?.isSystemAdmin) {
     return next(new HttpError(403, 'System Admin access required'));
+  }
+  next();
+}
+
+/** Require the caller to hold the tenant's Enterprise Admin role. */
+export function requireEnterpriseAdmin(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user?.tenantId || !req.user.roles.includes(SystemRoleKey.EnterpriseAdmin)) {
+    return next(new HttpError(403, 'Enterprise Admin access required'));
   }
   next();
 }
