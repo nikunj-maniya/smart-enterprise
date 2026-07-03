@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { Search, ChevronDown } from 'lucide-react';
+import { Search, ChevronDown, KeyRound, Copy, Check } from 'lucide-react';
 import {
   userStatus,
+  type AdminResetPasswordResponse,
   type EnterpriseDto,
   type EnterprisesResponse,
   type PlatformUserDto,
@@ -9,9 +10,10 @@ import {
 } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
-import { apiFetch } from '@/lib/api';
+import { Overlay } from '@/components/ui/overlay';
+import { apiFetch, ApiError } from '@/lib/api';
 
-const GRID_COLS = 'grid-cols-[1.8fr_1.6fr_1.2fr_1fr]';
+const GRID_COLS = 'grid-cols-[1.6fr_1.4fr_1.1fr_0.9fr_1fr]';
 
 const STATUS_STYLE: Record<PlatformUserDto['status'], { bg: string; fg: string; dot: string }> = {
   Active: { bg: 'rgb(233,246,233)', fg: 'rgb(33,131,88)', dot: 'rgb(70,167,88)' },
@@ -61,6 +63,14 @@ export default function PlatformUsers() {
   const [status, setStatus] = React.useState('');
   const [tenantId, setTenantId] = React.useState('');
   const [enterprises, setEnterprises] = React.useState<EnterpriseDto[]>([]);
+  const [resetting, setResetting] = React.useState<PlatformUserDto | null>(null);
+  const [resetResult, setResetResult] = React.useState<{
+    user: PlatformUserDto;
+    temporaryPassword: string;
+  } | null>(null);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [resetError, setResetError] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
     apiFetch<EnterprisesResponse>('/enterprises?pageSize=200').then((res) =>
@@ -91,6 +101,36 @@ export default function PlatformUsers() {
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
   const hasNextPage = page * pageSize < total;
+
+  function openReset(user: PlatformUserDto) {
+    setResetting(user);
+    setResetError(null);
+  }
+
+  async function onConfirmReset() {
+    if (!resetting) return;
+    setBusyId(resetting.id);
+    setResetError(null);
+    try {
+      const res = await apiFetch<AdminResetPasswordResponse>(
+        `/users/${resetting.id}/reset-password`,
+        { method: 'POST' },
+      );
+      setResetResult({ user: resetting, temporaryPassword: res.temporaryPassword });
+      setResetting(null);
+    } catch (err) {
+      setResetError(err instanceof ApiError ? err.message : 'Unable to reset the password.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onCopyTemporaryPassword() {
+    if (!resetResult) return;
+    await navigator.clipboard.writeText(resetResult.temporaryPassword);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <>
@@ -163,6 +203,7 @@ export default function PlatformUsers() {
           <span>Enterprise</span>
           <span>Role</span>
           <span>Status</span>
+          <span className="text-right">Actions</span>
         </div>
         {rows.map((user) => (
           <div
@@ -185,6 +226,17 @@ export default function PlatformUsers() {
             <span>
               <StatusBadge status={user.status} />
             </span>
+            <div className="flex justify-end">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => openReset(user)}
+                disabled={busyId === user.id}
+              >
+                <KeyRound size={14} />
+                Reset Password
+              </Button>
+            </div>
           </div>
         ))}
         {!loading && rows.length === 0 && (
@@ -239,6 +291,74 @@ export default function PlatformUsers() {
           </Button>
         </div>
       </div>
+
+      {resetting && (
+        <Overlay onClose={() => setResetting(null)}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-[rgba(236,245,246,1)] text-brand">
+                <KeyRound size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Reset password</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              This issues a new temporary password for <strong>{resetting.name}</strong> and
+              signs them out of any existing session. They&apos;ll be required to change it on
+              next login.
+            </div>
+            {resetError && <div className="mt-3 text-sm font-medium text-danger">{resetError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setResetting(null)}>
+                Cancel
+              </Button>
+              <Button onClick={onConfirmReset} disabled={busyId === resetting.id}>
+                {busyId === resetting.id ? 'Resetting…' : 'Reset Password'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
+      {resetResult && (
+        <Overlay
+          onClose={() => {
+            setResetResult(null);
+            setCopied(false);
+          }}
+        >
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-[rgba(236,245,246,1)] text-brand">
+                <KeyRound size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Password reset</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Share this temporary password with <strong>{resetResult.user.name}</strong> through
+              a secure channel — it won&apos;t be shown again.
+            </div>
+            <div className="mt-[18px] flex items-center justify-between gap-3 rounded-sm border border-line bg-app-bg px-[15px] py-[13px]">
+              <span className="truncate font-mono text-[15px] font-semibold text-ink-900">
+                {resetResult.temporaryPassword}
+              </span>
+              <Button variant="secondary" size="sm" onClick={onCopyTemporaryPassword}>
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <div className="mt-[22px] flex justify-end">
+              <Button
+                onClick={() => {
+                  setResetResult(null);
+                  setCopied(false);
+                }}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        </Overlay>
+      )}
     </>
   );
 }

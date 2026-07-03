@@ -1,6 +1,14 @@
+import { randomBytes } from 'node:crypto';
+import argon2 from 'argon2';
 import { Prisma, UserStatus } from '@prisma/client';
-import type { PlatformUserDto, PlatformUsersQuery, PlatformUsersResponse } from '@se/shared';
+import type {
+  AdminResetPasswordResponse,
+  PlatformUserDto,
+  PlatformUsersQuery,
+  PlatformUsersResponse,
+} from '@se/shared';
 import { prisma } from '../../prisma.js';
+import { HttpError } from '../../lib/http-error.js';
 
 export async function listPlatformUsers(
   query: PlatformUsersQuery,
@@ -50,4 +58,32 @@ export async function listPlatformUsers(
     page,
     pageSize,
   };
+}
+
+/** Admin-initiated reset — the no-email fallback (D-30). Issues a one-time temporary password. */
+export async function adminResetPassword(
+  userId: string,
+  actorId: string,
+): Promise<AdminResetPasswordResponse> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new HttpError(404, 'User not found');
+  if (user.isSystemAdmin) throw new HttpError(400, 'Cannot reset a System Admin account this way');
+
+  const temporaryPassword = randomBytes(9).toString('base64url');
+  const passwordHash = await argon2.hash(temporaryPassword);
+
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: userId }, data: { passwordHash, mustChangePassword: true } }),
+    prisma.auditLog.create({
+      data: {
+        tenantId: user.tenantId,
+        actorId,
+        entity: 'User',
+        entityId: user.id,
+        action: 'password_reset',
+      },
+    }),
+  ]);
+
+  return { temporaryPassword };
 }
