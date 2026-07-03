@@ -3,12 +3,16 @@ import {
   LayoutGrid,
   ClipboardCheck,
   Building2,
+  Building,
   Users,
+  Shield,
+  FolderKanban,
   ScrollText,
   Settings,
   LogOut,
   type LucideIcon,
 } from 'lucide-react';
+import { SystemRoleKey } from '@se/shared';
 import { useAuth } from '@/lib/auth';
 import { useRegistrationsCount } from '@/lib/registrationsCount';
 import { cn } from '@/lib/utils';
@@ -19,6 +23,13 @@ const platformNav: { to: string; label: string; icon: LucideIcon; end?: boolean 
   { to: '/enterprises', label: 'Enterprises', icon: Building2 },
   { to: '/users', label: 'Platform Users', icon: Users },
   { to: '/audit', label: 'Audit Log', icon: ScrollText },
+];
+
+const organizationNav: { to: string; label: string; icon: LucideIcon }[] = [
+  { to: '/organization/users', label: 'Users', icon: Users },
+  { to: '/organization/departments', label: 'Departments', icon: Building },
+  { to: '/organization/roles', label: 'Roles', icon: Shield },
+  { to: '/organization/projects', label: 'Projects', icon: FolderKanban },
 ];
 
 function SidebarLink({
@@ -79,6 +90,7 @@ function Initials({ name }: { name: string }) {
 export function Sidebar() {
   const { user, logout } = useAuth();
   const { pendingCount } = useRegistrationsCount();
+  const isEnterpriseAdmin = user?.roles.includes(SystemRoleKey.EnterpriseAdmin) ?? false;
   return (
     <div
       className="flex w-[248px] flex-none flex-col px-[14px] py-[18px]"
@@ -102,25 +114,47 @@ export function Sidebar() {
         </span>
       </div>
 
-      {/* Platform section */}
-      <div className="px-[10px] pb-[6px] pt-2 text-[11px] font-semibold tracking-[.6px] text-white/40">
-        PLATFORM
-      </div>
-      <div className="flex flex-col gap-[3px]">
-        {platformNav.map((item) => (
-          <SidebarLink
-            key={item.to}
-            {...item}
-            badge={item.to === '/registrations' ? pendingCount : undefined}
-          />
-        ))}
-      </div>
+      {/* Platform section — System Admin only */}
+      {user?.isSystemAdmin && (
+        <>
+          <div className="px-[10px] pb-[6px] pt-2 text-[11px] font-semibold tracking-[.6px] text-white/40">
+            PLATFORM
+          </div>
+          <div className="flex flex-col gap-[3px]">
+            {platformNav.map((item) => (
+              <SidebarLink
+                key={item.to}
+                {...item}
+                badge={item.to === '/registrations' ? pendingCount : undefined}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
-      {/* System section */}
-      <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
-        SYSTEM
-      </div>
-      <SidebarLink to="/settings" label="Settings" icon={Settings} />
+      {/* Organization section — Enterprise Admin only */}
+      {isEnterpriseAdmin && (
+        <>
+          <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
+            ORGANIZATION
+          </div>
+          <div className="flex flex-col gap-[3px]">
+            {organizationNav.map((item) => (
+              <SidebarLink key={item.to} {...item} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* System section — System Admin only */}
+      {user?.isSystemAdmin && (
+        <>
+          <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
+            SYSTEM
+          </div>
+          <SidebarLink to="/settings" label="Settings" icon={Settings} />
+        </>
+      )}
 
       {/* User */}
       <div className="mt-auto flex items-center gap-[11px] border-t border-white/[0.12] p-[10px]">
@@ -128,7 +162,7 @@ export function Sidebar() {
         <div className="min-w-0">
           <div className="whitespace-nowrap text-[13px] font-semibold text-white">{user?.name}</div>
           <div className="truncate text-[11px] text-white/55">
-            {user?.isSystemAdmin ? 'System Admin' : 'User'}
+            {user?.isSystemAdmin ? 'System Admin' : isEnterpriseAdmin ? 'Enterprise Admin' : 'User'}
           </div>
         </div>
         <button

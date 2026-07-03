@@ -16,6 +16,40 @@ export type TenantStatus = z.infer<typeof tenantStatus>;
 export const userStatus = z.enum(['Pending', 'Active', 'Inactive', 'Suspended']);
 export type UserStatus = z.infer<typeof userStatus>;
 
+// ── Org masters (roles & departments) — PRD §4.2-§4.3 ─────────
+/** Seeded, undeletable System roles created at tenant activation (design.md decision). */
+export const SystemRoleKey = {
+  Employee: 'employee',
+  ProjectManager: 'project-manager',
+  TechLead: 'tech-lead',
+  HrHead: 'hr-head',
+  ProcessHead: 'process-head',
+  ItAdmin: 'it-admin',
+  EnterpriseAdmin: 'enterprise-admin',
+} as const;
+export type SystemRoleKey = (typeof SystemRoleKey)[keyof typeof SystemRoleKey];
+export const SYSTEM_ROLE_KEYS: SystemRoleKey[] = Object.values(SystemRoleKey);
+
+export const SYSTEM_ROLE_NAMES: Record<SystemRoleKey, string> = {
+  [SystemRoleKey.Employee]: 'Employee',
+  [SystemRoleKey.ProjectManager]: 'Project Manager',
+  [SystemRoleKey.TechLead]: 'Tech Lead',
+  [SystemRoleKey.HrHead]: 'HR Head',
+  [SystemRoleKey.ProcessHead]: 'Process Head',
+  [SystemRoleKey.ItAdmin]: 'IT Admin',
+  [SystemRoleKey.EnterpriseAdmin]: 'Enterprise Admin',
+};
+
+/** Seed departments created at tenant activation — PRD §4.3. */
+export const DEFAULT_DEPARTMENT_NAMES = [
+  'IOT',
+  'Developer',
+  'HR',
+  'Admin & Management',
+  'Sales & Marketing',
+  'Other',
+] as const;
+
 // ── Auth ───────────────────────────────────────────────────
 export const loginRequestSchema = z.object({
   email: z.string().email(),
@@ -54,6 +88,9 @@ export const authUserSchema = z.object({
   isSystemAdmin: z.boolean(),
   mustChangePassword: z.boolean(),
   tenantId: z.string().nullable(),
+  tenantName: z.string().nullable(),
+  /** Role keys held by this user (e.g. "enterprise-admin") — drives the union sidebar. */
+  roles: z.array(z.string()),
 });
 export type AuthUser = z.infer<typeof authUserSchema>;
 

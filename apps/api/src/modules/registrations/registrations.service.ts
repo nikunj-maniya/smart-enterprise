@@ -10,6 +10,7 @@ import { AuditAction, RegistrationStatus } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 import { getSettings } from '../settings/settings.service.js';
+import { grantEnterpriseAdminRole, seedTenantOrgDefaults } from '../org-masters/seed.service.js';
 
 function toDto(reg: {
   id: string;
@@ -153,6 +154,8 @@ export async function acceptRegistration(
   const updated = await prisma.$transaction(async (tx) => {
     await tx.tenant.update({ where: { id: reg.tenantId }, data: { status: TenantStatus.Active } });
     await tx.user.update({ where: { id: reg.userId }, data: { status: UserStatus.Active } });
+    await seedTenantOrgDefaults(tx, reg.tenantId);
+    await grantEnterpriseAdminRole(tx, reg.tenantId, reg.userId);
     const updatedReg = await tx.enterpriseRegistration.update({
       where: { id },
       data: { status: RegistrationStatus.Accepted, reviewedBy: actorId },

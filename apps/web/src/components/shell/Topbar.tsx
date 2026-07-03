@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Bell, ClipboardCheck } from 'lucide-react';
+import { Search, Bell, ClipboardCheck, ChevronDown, UserRound, LogOut } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { NotificationDto } from '@se/shared';
 import { useAuth } from '@/lib/auth';
@@ -133,8 +133,54 @@ function NotificationsMenu() {
   );
 }
 
+function UserMenu() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        className="flex items-center gap-[10px] rounded-md py-1 pl-1 pr-2 hover:bg-surface-muted"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Initials name={user?.name ?? '?'} />
+        <div className="text-left">
+          <div className="text-[13px] font-semibold">{user?.name}</div>
+          <div className="text-[11px] text-ink-400">{user?.email}</div>
+        </div>
+        <ChevronDown size={15} className="text-ink-400" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-11 z-[41] w-[220px] overflow-hidden rounded-xl border border-line-soft bg-surface p-[6px] shadow-xl">
+            <div
+              className="flex cursor-pointer items-center gap-[11px] rounded-sm px-3 py-[10px] text-[13.5px] font-medium text-ink-700 hover:bg-surface-muted"
+              onClick={() => {
+                setOpen(false);
+                navigate('/profile');
+              }}
+            >
+              <UserRound size={17} className="text-ink-500" />
+              View profile
+            </div>
+            <div className="my-[6px] h-px bg-line-soft" />
+            <div
+              className="flex cursor-pointer items-center gap-[11px] rounded-sm px-3 py-[10px] text-[13.5px] font-medium text-danger hover:bg-danger/[0.08]"
+              onClick={logout}
+            >
+              <LogOut size={17} className="text-danger" />
+              Log out
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Topbar() {
-  const { user } = useAuth();
   const [searchOpen, setSearchOpen] = React.useState(false);
 
   return (
@@ -151,13 +197,7 @@ export function Topbar() {
       <div className="ml-auto flex items-center gap-[18px]">
         <NotificationsMenu />
         <div className="h-[26px] w-px bg-line-soft" />
-        <div className="flex items-center gap-[10px]">
-          <Initials name={user?.name ?? '?'} />
-          <div>
-            <div className="text-[13px] font-semibold">{user?.name}</div>
-            <div className="text-[11px] text-ink-400">{user?.email}</div>
-          </div>
-        </div>
+        <UserMenu />
       </div>
 
       <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
