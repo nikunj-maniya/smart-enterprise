@@ -94,14 +94,15 @@ model User {
   isSystemAdmin      Boolean    @default(false)
   createdAt          DateTime   @default(now())
 
-  tenant         Tenant?          @relation(fields: [tenantId], references: [id])
-  roles          UserRole[]
-  departments    UserDepartment[]
-  projectMembers ProjectMember[]
-  leaveBalances  LeaveBalance[]
-  requests       Request[]
-  registration   EnterpriseRegistration?
-  resetTokens    PasswordResetToken[]
+  tenant            Tenant?              @relation(fields: [tenantId], references: [id])
+  roles             UserRole[]
+  departments       UserDepartment[]
+  projectMembers    ProjectMember[]
+  leaveBalances     LeaveBalance[]
+  requests          Request[]
+  registration      EnterpriseRegistration?
+  resetTokens       PasswordResetToken[]
+  headOfDepartments Department[]         @relation("DepartmentHead")
 
   @@index([tenantId])
 }
@@ -146,14 +147,17 @@ model UserRole {
 }
 
 model Department {
-  id       String @id @default(cuid())
-  tenantId String
-  name     String
+  id         String  @id @default(cuid())
+  tenantId   String
+  name       String
+  headUserId String?
 
   tenant Tenant           @relation(fields: [tenantId], references: [id])
+  head   User?            @relation("DepartmentHead", fields: [headUserId], references: [id])
   users  UserDepartment[]
 
   @@index([tenantId])
+  @@index([headUserId])
 }
 
 model UserDepartment {

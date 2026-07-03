@@ -6,9 +6,9 @@
 
 ## 2. Departments Master
 
-- [ ] 2.1 Tenant-scoped Department CRUD API (Zod-validated, audited) _(Slice 2)_
-- [ ] 2.2 Departments page: card grid, search, empty state, pagination — match the design exactly _(Slice 2)_
-- [ ] 2.3 Department create/edit via the entity modal (name, head, members count display) _(Slice 2)_
+- [x] 2.1 Tenant-scoped Department Create/List/Update API (Zod-validated, audited) _(Slice 2)_. Delete deferred to Slice 7 — the prototype has no delete action on any master (Departments/Roles/Projects), matching "Referential-integrity on master-data deletes" being its own slice.
+- [x] 2.2 Departments page: card grid, search, empty state, pagination — match the design exactly _(Slice 2)_
+- [x] 2.3 Department create/edit via the entity modal (name, head) _(Slice 2)_. Members count is a real computed value (UserDepartment count, 0 until Slice 4 ships user↔department assignment) rather than the prototype mock's free-typed number — the mock has no backing data model, so its editable "Members" field isn't a real requirement.
 
 ## 3. Roles & Permissions Master
 

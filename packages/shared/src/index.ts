@@ -325,4 +325,45 @@ export const updatePlatformSettingsSchema = z.object({
   allowPublicRegistration: z.boolean().optional(),
   notifyOnNewRegistration: z.boolean().optional(),
 });
+
+// ── Departments master (org-masters) ───────────────────────────
+export const departmentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  headUserId: z.string().nullable(),
+  headName: z.string().nullable(),
+  memberCount: z.number(),
+});
+export type DepartmentDto = z.infer<typeof departmentSchema>;
+
+export const departmentsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().optional(),
+});
+export type DepartmentsQuery = z.infer<typeof departmentsQuerySchema>;
+
+export const departmentsResponseSchema = z.object({
+  rows: z.array(departmentSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type DepartmentsResponse = z.infer<typeof departmentsResponseSchema>;
+
+export const createDepartmentRequestSchema = z.object({
+  name: z.string().min(1, 'Department name is required'),
+  headUserId: z.string().nullable().optional(),
+});
+export type CreateDepartmentRequest = z.infer<typeof createDepartmentRequestSchema>;
+
+export const updateDepartmentRequestSchema = createDepartmentRequestSchema;
+export type UpdateDepartmentRequest = z.infer<typeof updateDepartmentRequestSchema>;
+
+// ── Org users (tenant-scoped picker; full CRUD lands in Slice 4) ──
+export const orgUserPickerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+export type OrgUserPickerDto = z.infer<typeof orgUserPickerSchema>;
 export type UpdatePlatformSettingsRequest = z.infer<typeof updatePlatformSettingsSchema>;

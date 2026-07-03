@@ -10,6 +10,8 @@ import { enterprisesRouter } from './modules/enterprises/enterprises.routes.js';
 import { usersRouter } from './modules/users/users.routes.js';
 import { auditLogRouter } from './modules/audit-log/audit-log.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
+import { departmentsRouter } from './modules/departments/departments.routes.js';
+import { orgUsersRouter } from './modules/org-users/org-users.routes.js';
 import { errorHandler } from './middleware/error.js';
 
 const app = express();
@@ -33,6 +35,8 @@ app.use('/enterprises', enterprisesRouter);
 app.use('/users', usersRouter);
 app.use('/audit-log', auditLogRouter);
 app.use('/settings', settingsRouter);
+app.use('/departments', departmentsRouter);
+app.use('/org-users', orgUsersRouter);
 
 app.use(errorHandler);
 
