@@ -9,3 +9,5 @@ rolesRouter.get('/', rolesController.list);
 rolesRouter.post('/', rolesController.create);
 rolesRouter.put('/:id', rolesController.update);
 rolesRouter.delete('/:id', rolesController.remove);
+rolesRouter.post('/:id/archive', rolesController.archive);
+rolesRouter.post('/:id/unarchive', rolesController.archive);

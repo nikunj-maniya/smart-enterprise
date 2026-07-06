@@ -37,7 +37,7 @@
 ## 7. Referential Integrity
 
 - [x] 7.1 Dependency-count checks blocking deletes across departments/roles/projects (and users), with named reasons _(brought forward into Slices 3/4/6 per user feedback 2026-07-06)_. Roles block on assigned members (System roles undeletable); Departments block on assigned users/requests; Projects block on assigned people/requests; Users block on dept-head/project/requests. All audited.
-- [ ] 7.2 `archived` flag + archive action; archived masters hidden from pickers, visible in history _(Slice 7 — still pending; Projects already have an active/archived status, but a generic archive-instead-of-delete flow for departments/roles is not built)_
+- [x] 7.2 `archived` flag + archive/unarchive action; archived masters hidden from assignment pickers, still visible in the management list (with an "Archived" badge) and on existing records _(Slice 7)_. Added to Departments (card Archive/Unarchive action) and custom Roles (row action; System roles can't be archived); Projects already have this via their active/archived status. Pickers pass `archived=false`; audited.
 - [x] 7.3 Blocked-delete UI: confirmation modals with explanation + named dependency reason (and, for projects, the archive-instead hint) _(brought forward per user feedback 2026-07-06)_. Delete affordances: role/project row trash, department card trash, user row trash — each with a confirm modal surfacing the API's dependency message on 409.
 
 ## 8. Profile

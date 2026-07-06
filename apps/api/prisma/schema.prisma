@@ -148,6 +148,7 @@ model Role {
   name        String
   permissions String[]
   isSystem    Boolean  @default(false) // seeded System roles: renamable, permissions fixed, undeletable
+  archived    Boolean  @default(false) // archived roles are hidden from assignment pickers, kept in history
 
   tenant Tenant     @relation(fields: [tenantId], references: [id])
   users  UserRole[]
@@ -167,9 +168,10 @@ model UserRole {
 }
 
 model Department {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   tenantId String
   name     String
+  archived Boolean @default(false) // archived departments are hidden from pickers, kept in history
 
   tenant Tenant           @relation(fields: [tenantId], references: [id])
   heads  DepartmentHead[]

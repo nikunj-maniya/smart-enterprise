@@ -44,3 +44,17 @@ export async function remove(req: Request, res: Response, next: NextFunction) {
     next(err);
   }
 }
+
+export async function archive(req: Request, res: Response, next: NextFunction) {
+  try {
+    const role = await rolesService.setRoleArchived(
+      req.user!.tenantId!,
+      req.params.id,
+      req.user!.id,
+      req.path.endsWith('/unarchive') ? false : true,
+    );
+    res.json(role);
+  } catch (err) {
+    next(err);
+  }
+}

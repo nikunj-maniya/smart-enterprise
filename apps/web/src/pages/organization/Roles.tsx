@@ -1,5 +1,15 @@
 import * as React from 'react';
-import { Search, PencilLine, Plus, Check, ShieldCheck, Lock, Trash2 } from 'lucide-react';
+import {
+  Search,
+  PencilLine,
+  Plus,
+  Check,
+  ShieldCheck,
+  Lock,
+  Trash2,
+  Archive,
+  ArchiveRestore,
+} from 'lucide-react';
 import {
   PERMISSION_CATALOG,
   permissionScopeSummary,
@@ -233,6 +243,12 @@ export default function Roles() {
     setDeleteError(null);
   }
 
+  async function onToggleArchive(role: RoleDto) {
+    const action = role.archived ? 'unarchive' : 'archive';
+    await apiFetch(`/roles/${role.id}/${action}`, { method: 'POST' });
+    load();
+  }
+
   async function onConfirmDelete() {
     if (!deleting) return;
     setDeleteBusy(true);
@@ -318,14 +334,32 @@ export default function Roles() {
               {permissionScopeSummary(role.permissions)}
             </span>
             <span className="text-[13px] text-ink-700">{role.memberCount}</span>
-            <span>
+            <span className="flex items-center gap-2">
               <TypeBadge isSystem={role.isSystem} />
+              {role.archived && (
+                <span className="rounded-full bg-surface-muted px-[8px] py-[2px] text-[11px] font-semibold text-ink-400">
+                  Archived
+                </span>
+              )}
             </span>
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setEditing(role)}>
-                <PencilLine size={14} />
-                Edit
-              </Button>
+              {!role.archived && (
+                <Button variant="secondary" size="sm" onClick={() => setEditing(role)}>
+                  <PencilLine size={14} />
+                  Edit
+                </Button>
+              )}
+              {!role.isSystem && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onToggleArchive(role)}
+                  aria-label={`${role.archived ? 'Unarchive' : 'Archive'} ${role.name}`}
+                  title={role.archived ? 'Unarchive' : 'Archive'}
+                >
+                  {role.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                </Button>
+              )}
               {!role.isSystem && (
                 <Button
                   variant="secondary"

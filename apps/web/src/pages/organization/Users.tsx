@@ -598,8 +598,11 @@ export default function OrgUsers() {
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
-    apiFetch<RolesResponse>('/roles?pageSize=100').then((r) => setRoles(r.rows));
-    apiFetch<DepartmentsResponse>('/departments?pageSize=100').then((r) => setDepartments(r.rows));
+    // archived=false: retired roles/departments aren't offered for new assignments.
+    apiFetch<RolesResponse>('/roles?pageSize=100&archived=false').then((r) => setRoles(r.rows));
+    apiFetch<DepartmentsResponse>('/departments?pageSize=100&archived=false').then((r) =>
+      setDepartments(r.rows),
+    );
   }, []);
 
   React.useEffect(() => {
