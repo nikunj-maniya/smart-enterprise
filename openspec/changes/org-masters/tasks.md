@@ -42,8 +42,8 @@
 
 ## 8. Profile
 
-- [ ] 8.1 Self-profile API: read/update own info + change-password endpoint _(Slice 8)_
-- [ ] 8.2 Profile page per the design (avatar header, personal info form, change password; notification toggles rendered disabled) _(Slice 8)_
+- [x] 8.1 Self-profile API: `GET/PUT /profile` (read/update own name, phone, job title, location) + change-password via the existing `/auth/change-password` _(Slice 8)_. Adds User.phone/jobTitle/location (migration). Email, roles, and departments are returned read-only (admin-managed).
+- [x] 8.2 Profile page per the design (avatar header, personal info form, change password; notification toggles rendered disabled) _(Slice 8)_. Editable: name/phone/job title/location; email/roles/departments shown read-only (per spec, overriding the mock which made them editable). Change-password requires the current password (added for security, beyond the mock's new+confirm). Notification toggles render disabled with a "Coming soon" badge until `notifications-inapp`. "Change photo" omitted (no avatar storage this phase). Saving the name refreshes the top-bar/sidebar via a new auth-context `refresh()`.
 
 ## 9. Verify
 

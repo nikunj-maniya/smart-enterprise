@@ -14,6 +14,7 @@ import { departmentsRouter } from './modules/departments/departments.routes.js';
 import { rolesRouter } from './modules/roles/roles.routes.js';
 import { orgUsersRouter } from './modules/org-users/org-users.routes.js';
 import { projectsRouter } from './modules/projects/projects.routes.js';
+import { profileRouter } from './modules/profile/profile.routes.js';
 import {
   selfRegistrationRouter,
   publicSelfRegistrationRouter,
@@ -45,6 +46,7 @@ app.use('/departments', departmentsRouter);
 app.use('/roles', rolesRouter);
 app.use('/org-users', orgUsersRouter);
 app.use('/projects', projectsRouter);
+app.use('/profile', profileRouter);
 app.use('/self-registration', selfRegistrationRouter);
 app.use('/public/self-registration', publicSelfRegistrationRouter);
 

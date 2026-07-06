@@ -648,3 +648,25 @@ export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 
 export const updateProjectRequestSchema = createProjectRequestSchema;
 export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;
+
+// ── Profile (self-service, any authenticated user) ─────────────
+export const profileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  phone: z.string().nullable(),
+  jobTitle: z.string().nullable(),
+  location: z.string().nullable(),
+  // Admin-managed, shown read-only on the profile.
+  roles: z.array(z.string()),
+  departments: z.array(z.string()),
+});
+export type ProfileDto = z.infer<typeof profileSchema>;
+
+export const updateProfileRequestSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  phone: z.string().nullable().optional(),
+  jobTitle: z.string().nullable().optional(),
+  location: z.string().nullable().optional(),
+});
+export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;
