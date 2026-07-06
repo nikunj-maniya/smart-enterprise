@@ -15,6 +15,7 @@ import {
   RefreshCw,
   ShieldCheck,
   PencilLine,
+  Trash2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -588,6 +589,7 @@ export default function OrgUsers() {
   const [linkModalOpen, setLinkModalOpen] = React.useState(false);
   const [deactivating, setDeactivating] = React.useState<OrgUserDto | null>(null);
   const [rejecting, setRejecting] = React.useState<OrgUserDto | null>(null);
+  const [removing, setRemoving] = React.useState<OrgUserDto | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [resetResult, setResetResult] = React.useState<{ user: OrgUserDto; password: string } | null>(
@@ -642,6 +644,21 @@ export default function OrgUsers() {
       load();
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : 'Unable to deactivate the user.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onConfirmRemove() {
+    if (!removing) return;
+    setBusyId(removing.id);
+    setActionError(null);
+    try {
+      await apiFetch(`/org-users/${removing.id}`, { method: 'DELETE' });
+      setRemoving(null);
+      load();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Unable to remove the user.');
     } finally {
       setBusyId(null);
     }
@@ -886,16 +903,42 @@ export default function OrgUsers() {
                   >
                     Deactivate
                   </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setRemoving(u);
+                      setActionError(null);
+                    }}
+                    disabled={busyId === u.id}
+                    aria-label={`Remove ${u.name}`}
+                  >
+                    <Trash2 size={14} className="text-danger" />
+                  </Button>
                 </>
               ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onReactivate(u)}
-                  disabled={busyId === u.id}
-                >
-                  {busyId === u.id ? 'Reactivating…' : 'Reactivate'}
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onReactivate(u)}
+                    disabled={busyId === u.id}
+                  >
+                    {busyId === u.id ? 'Reactivating…' : 'Reactivate'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setRemoving(u);
+                      setActionError(null);
+                    }}
+                    disabled={busyId === u.id}
+                    aria-label={`Remove ${u.name}`}
+                  >
+                    <Trash2 size={14} className="text-danger" />
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -959,6 +1002,33 @@ export default function OrgUsers() {
             load();
           }}
         />
+      )}
+
+      {removing && (
+        <Overlay onClose={() => setRemoving(null)} z={60}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-danger/[0.12] text-danger">
+                <Trash2 size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Remove user</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Permanently remove <strong>{removing.name}</strong> ({removing.email})? This can&apos;t
+              be undone. To keep their history, use Deactivate instead — and a user who heads a
+              department or is on a project can&apos;t be removed until reassigned.
+            </div>
+            {actionError && <div className="mt-3 text-sm font-medium text-danger">{actionError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setRemoving(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={onConfirmRemove} disabled={busyId === removing.id}>
+                {busyId === removing.id ? 'Removing…' : 'Remove user'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
       )}
 
       {deactivating && (

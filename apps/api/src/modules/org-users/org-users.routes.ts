@@ -10,6 +10,7 @@ orgUsersRouter.get('/options', orgUsersController.options);
 orgUsersRouter.get('/stats', orgUsersController.stats);
 orgUsersRouter.post('/', orgUsersController.create);
 orgUsersRouter.put('/:id', orgUsersController.update);
+orgUsersRouter.delete('/:id', orgUsersController.remove);
 orgUsersRouter.post('/:id/deactivate', orgUsersController.deactivate);
 orgUsersRouter.post('/:id/reactivate', orgUsersController.reactivate);
 orgUsersRouter.post('/:id/approve', orgUsersController.approve);

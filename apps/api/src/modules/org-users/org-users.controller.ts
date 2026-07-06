@@ -55,6 +55,15 @@ export async function deactivate(req: Request, res: Response, next: NextFunction
   }
 }
 
+export async function remove(req: Request, res: Response, next: NextFunction) {
+  try {
+    await orgUsersService.deleteOrgUser(req.user!.tenantId!, req.params.id, req.user!.id);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function reactivate(req: Request, res: Response, next: NextFunction) {
   try {
     const user = await orgUsersService.reactivateOrgUser(

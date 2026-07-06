@@ -223,6 +223,56 @@ async function findTenantUser(tenantId: string, id: string) {
   return user;
 }
 
+/**
+ * Permanently removes a user. Blocked while they hold structural assignments or have
+ * history that must be preserved (§5A.1 referential integrity) — deactivate those instead.
+ */
+export async function deleteOrgUser(tenantId: string, id: string, actorId: string): Promise<void> {
+  const user = await findTenantUser(tenantId, id);
+  if (user.id === actorId) throw new HttpError(400, 'You cannot remove your own account');
+
+  const [deptHeadCount, projectCount, requestCount] = await Promise.all([
+    prisma.departmentHead.count({ where: { userId: id } }),
+    prisma.projectMember.count({ where: { userId: id } }),
+    prisma.request.count({ where: { requesterId: id } }),
+  ]);
+  if (deptHeadCount > 0) {
+    throw new HttpError(
+      409,
+      `This user heads ${deptHeadCount} department${deptHeadCount === 1 ? '' : 's'}. Reassign the head before removing them.`,
+    );
+  }
+  if (projectCount > 0) {
+    throw new HttpError(
+      409,
+      `This user is assigned to ${projectCount} project${projectCount === 1 ? '' : 's'}. Remove them from those projects first.`,
+    );
+  }
+  if (requestCount > 0) {
+    throw new HttpError(
+      409,
+      'This user has submitted requests. Deactivate them instead so their history stays intact.',
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.userRole.deleteMany({ where: { userId: id } });
+    await tx.userDepartment.deleteMany({ where: { userId: id } });
+    await tx.passwordResetToken.deleteMany({ where: { userId: id } });
+    await tx.user.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: id,
+        action: 'remove',
+        before: { name: user.name, email: user.email },
+      },
+    });
+  });
+}
+
 export async function deactivateOrgUser(
   tenantId: string,
   id: string,
