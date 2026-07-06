@@ -31,8 +31,8 @@
 ## 6. Projects Master
 
 - [x] 6.1 Tenant-scoped Project create/list/update API with PM/Tech Lead/member assignment, audited _(Slice 6)_. Adds `Project.status` (active/archived); reuses `ProjectMember.roleInProject` (PM/TL/member). A user holds one slot per project (PK), so PM≠TL is enforced and members exclude whoever is PM/TL. Delete deferred to Slice 7 — consistent with Departments/Roles (prototype is Edit-only).
-- [x] 6.2 Projects page: table (Project, Project Manager, Tech Lead, Members, Status badge, Edit), search, All/Active/Archived filter chips, pagination — match the design _(Slice 6)_.
-- [x] 6.3 Project create/edit modal (name, status, single-select PM, single-select Tech Lead, **multi-select members**) _(Slice 6)_. Members is a real user multi-select (the count in the table is the real `ProjectMember` count) rather than the prototype mock's free-typed number — the mock predates the real assignment model, and the spec requires real members that "drive approver resolution."
+- [x] 6.2 Projects page: table (Project, Project Manager, Tech Lead, Members, Status, Edit), search, All/Active/Archived filter chips, pagination — match the design _(Slice 6)_. Status is an **inline dropdown** (change Active⇄Archived directly from the row), not just a static badge (user feedback 2026-07-06).
+- [x] 6.3 Project create/edit modal (name, status, single-select PM, single-select Tech Lead, **multi-select members**) _(Slice 6)_. Members is a real user multi-select (the count in the table is the real `ProjectMember` count) rather than the prototype mock's free-typed number. Per user feedback (2026-07-06): the **PM dropdown lists only Project-Manager-role holders and the Tech Lead dropdown only Tech-Lead-role holders** (via `/org-users/options?role=`), while Members lists all enterprise users except the chosen PM/Lead. The current holder is kept selectable on edit even if their role was later removed.
 
 ## 7. Referential Integrity
 

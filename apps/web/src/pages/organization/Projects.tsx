@@ -1,10 +1,12 @@
 import * as React from 'react';
 import { Search, ChevronDown, Plus, PencilLine, Check } from 'lucide-react';
-import type {
-  CreateProjectRequest,
-  OrgUserPickerDto,
-  ProjectDto,
-  ProjectsResponse,
+import {
+  SystemRoleKey,
+  type CreateProjectRequest,
+  type OrgUserPickerDto,
+  type OrgUserRef,
+  type ProjectDto,
+  type ProjectsResponse,
 } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -25,16 +27,53 @@ const STATUS_STYLE: Record<ProjectDto['status'], { label: string; bg: string; fg
   archived: { label: 'Archived', bg: 'rgb(241,242,242)', fg: 'var(--ink-500)', dot: 'var(--ink-400)' },
 };
 
-function StatusBadge({ status }: { status: ProjectDto['status'] }) {
-  const c = STATUS_STYLE[status];
+/** Ensures the currently-assigned person stays selectable even if they no longer hold the role. */
+function mergeCurrent(
+  options: OrgUserPickerDto[],
+  current: OrgUserRef | null | undefined,
+): OrgUserPickerDto[] {
+  if (!current || options.some((o) => o.id === current.id)) return options;
+  return [{ id: current.id, name: current.name }, ...options];
+}
+
+/** Inline, colored status pill that doubles as a dropdown to change the project's status. */
+function StatusSelect({
+  value,
+  busy,
+  onChange,
+}: {
+  value: ProjectDto['status'];
+  busy: boolean;
+  onChange: (s: ProjectDto['status']) => void;
+}) {
+  const c = STATUS_STYLE[value];
   return (
-    <span
-      className="inline-flex items-center gap-[6px] rounded-full px-[10px] py-1 text-xs font-medium"
-      style={{ background: c.bg, color: c.fg }}
+    <div
+      className="relative inline-flex items-center gap-[6px] rounded-full py-1 pl-[10px] pr-[22px] text-xs font-medium"
+      style={{ background: c.bg, color: c.fg, opacity: busy ? 0.6 : 1 }}
     >
       <span className="h-[6px] w-[6px] flex-none rounded-full" style={{ background: c.dot }} />
-      {c.label}
-    </span>
+      <select
+        value={value}
+        disabled={busy}
+        onChange={(e) => onChange(e.target.value as ProjectDto['status'])}
+        aria-label="Project status"
+        className="cursor-pointer appearance-none bg-transparent text-xs font-medium outline-none"
+        style={{ color: c.fg }}
+      >
+        <option value="active" className="text-ink-900">
+          Active
+        </option>
+        <option value="archived" className="text-ink-900">
+          Archived
+        </option>
+      </select>
+      <ChevronDown
+        size={12}
+        className="pointer-events-none absolute right-[7px]"
+        style={{ color: c.fg }}
+      />
+    </div>
   );
 }
 
@@ -75,12 +114,16 @@ function UserSelect({
 
 function ProjectModal({
   project,
-  users,
+  pmOptions,
+  tlOptions,
+  allUsers,
   onClose,
   onSaved,
 }: {
   project: ProjectDto | null;
-  users: OrgUserPickerDto[];
+  pmOptions: OrgUserPickerDto[];
+  tlOptions: OrgUserPickerDto[];
+  allUsers: OrgUserPickerDto[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -94,8 +137,13 @@ function ProjectModal({
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
+  // Only role-holders are eligible for PM / Tech Lead. Keep the current holder in the list
+  // even if their role was later removed, so editing doesn't silently drop the assignment.
+  const pmChoices = mergeCurrent(pmOptions, project?.pm);
+  const tlChoices = mergeCurrent(tlOptions, project?.techLead);
+
   // A person can hold only one slot per project; hide the chosen PM/TL from the member list.
-  const memberOptions = users.filter((u) => u.id !== pmUserId && u.id !== techLeadUserId);
+  const memberOptions = allUsers.filter((u) => u.id !== pmUserId && u.id !== techLeadUserId);
 
   function toggleMember(id: string) {
     setMemberIds((prev) => {
@@ -176,13 +224,13 @@ function ProjectModal({
             <UserSelect
               label="Project Manager"
               value={pmUserId}
-              users={users}
+              users={pmChoices}
               onChange={setPmUserId}
             />
             <UserSelect
               label="Tech Lead"
               value={techLeadUserId}
-              users={users}
+              users={tlChoices}
               onChange={setTechLeadUserId}
             />
           </div>
@@ -246,12 +294,22 @@ export default function Projects() {
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [status, setStatus] = React.useState<StatusFilter>('');
-  const [users, setUsers] = React.useState<OrgUserPickerDto[]>([]);
+  const [allUsers, setAllUsers] = React.useState<OrgUserPickerDto[]>([]);
+  const [pmOptions, setPmOptions] = React.useState<OrgUserPickerDto[]>([]);
+  const [tlOptions, setTlOptions] = React.useState<OrgUserPickerDto[]>([]);
   const [editing, setEditing] = React.useState<ProjectDto | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const [statusBusyId, setStatusBusyId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    apiFetch<OrgUserPickerDto[]>('/org-users/options').then(setUsers);
+    // Members can be anyone; PM/Tech Lead are limited to holders of the matching system role.
+    apiFetch<OrgUserPickerDto[]>('/org-users/options').then(setAllUsers);
+    apiFetch<OrgUserPickerDto[]>(`/org-users/options?role=${SystemRoleKey.ProjectManager}`).then(
+      setPmOptions,
+    );
+    apiFetch<OrgUserPickerDto[]>(`/org-users/options?role=${SystemRoleKey.TechLead}`).then(
+      setTlOptions,
+    );
   }, []);
 
   React.useEffect(() => {
@@ -285,6 +343,27 @@ export default function Projects() {
     setEditing(null);
     setCreating(false);
     load();
+  }
+
+  // Inline status change from the table — reuses the update endpoint, keeping assignments intact.
+  async function onChangeStatus(p: ProjectDto, next: ProjectDto['status']) {
+    if (next === p.status) return;
+    setStatusBusyId(p.id);
+    try {
+      await apiFetch(`/projects/${p.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: p.name,
+          status: next,
+          pmUserId: p.pm?.id ?? null,
+          techLeadUserId: p.techLead?.id ?? null,
+          memberIds: p.members.map((m) => m.id),
+        } satisfies CreateProjectRequest),
+      });
+      load();
+    } finally {
+      setStatusBusyId(null);
+    }
   }
 
   const GRID = 'grid-cols-[1.6fr_1.4fr_1.4fr_0.8fr_1fr_0.8fr]';
@@ -357,7 +436,11 @@ export default function Projects() {
             <span className="pr-3 text-[13px] text-ink-700">{p.techLead?.name ?? '—'}</span>
             <span className="text-[13px] text-ink-700">{p.memberCount}</span>
             <span>
-              <StatusBadge status={p.status} />
+              <StatusSelect
+                value={p.status}
+                busy={statusBusyId === p.id}
+                onChange={(next) => onChangeStatus(p, next)}
+              />
             </span>
             <div className="flex justify-end">
               <Button variant="secondary" size="sm" onClick={() => setEditing(p)}>
@@ -404,7 +487,9 @@ export default function Projects() {
       {(creating || editing) && (
         <ProjectModal
           project={editing}
-          users={users}
+          pmOptions={pmOptions}
+          tlOptions={tlOptions}
+          allUsers={allUsers}
           onClose={() => {
             setCreating(false);
             setEditing(null);

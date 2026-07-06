@@ -17,7 +17,8 @@ export async function list(req: Request, res: Response, next: NextFunction) {
 
 export async function options(req: Request, res: Response, next: NextFunction) {
   try {
-    res.json(await orgUsersService.listOrgUserOptions(req.user!.tenantId!));
+    const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+    res.json(await orgUsersService.listOrgUserOptions(req.user!.tenantId!, role));
   } catch (err) {
     next(err);
   }

@@ -67,10 +67,20 @@ export async function listOrgUsers(
   return { rows: rows.map(toDto), total, page, pageSize };
 }
 
-/** Lightweight tenant user list for pickers (e.g. department heads). Active users only. */
-export async function listOrgUserOptions(tenantId: string): Promise<OrgUserPickerDto[]> {
+/**
+ * Lightweight tenant user list for pickers (e.g. department heads, project PM/Tech Lead).
+ * Active users only; optionally restricted to holders of a given role key.
+ */
+export async function listOrgUserOptions(
+  tenantId: string,
+  roleKey?: string,
+): Promise<OrgUserPickerDto[]> {
   return prisma.user.findMany({
-    where: { tenantId, status: UserStatus.Active },
+    where: {
+      tenantId,
+      status: UserStatus.Active,
+      ...(roleKey ? { roles: { some: { role: { key: roleKey } } } } : {}),
+    },
     select: { id: true, name: true },
     orderBy: { name: 'asc' },
   });
