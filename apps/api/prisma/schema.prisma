@@ -107,6 +107,10 @@ model User {
   status             UserStatus @default(Pending)
   mustChangePassword Boolean    @default(false) // drives forced password change (resetPassword flag)
   isSystemAdmin      Boolean    @default(false)
+  // Self-service profile fields (PRD §5A / Profile) — user-editable, optional.
+  phone              String?
+  jobTitle           String?
+  location           String?
   createdAt          DateTime   @default(now())
 
   tenant            Tenant?              @relation(fields: [tenantId], references: [id])
