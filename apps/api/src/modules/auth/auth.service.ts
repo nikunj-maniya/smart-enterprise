@@ -42,6 +42,9 @@ function toAuthUser(u: {
 export async function login(email: string, password: string): Promise<LoginResponse> {
   const user = await prisma.user.findUnique({ where: { email }, include: withRolesAndTenant });
   if (!user) throw new HttpError(401, 'Invalid email or password');
+  if (user.status === UserStatus.Pending) {
+    throw new HttpError(403, 'Your account is awaiting approval by your administrator.');
+  }
   if (user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
     throw new HttpError(403, 'Account is not active');
   }

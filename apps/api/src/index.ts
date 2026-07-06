@@ -13,6 +13,10 @@ import { settingsRouter } from './modules/settings/settings.routes.js';
 import { departmentsRouter } from './modules/departments/departments.routes.js';
 import { rolesRouter } from './modules/roles/roles.routes.js';
 import { orgUsersRouter } from './modules/org-users/org-users.routes.js';
+import {
+  selfRegistrationRouter,
+  publicSelfRegistrationRouter,
+} from './modules/self-registration/self-registration.routes.js';
 import { errorHandler } from './middleware/error.js';
 
 const app = express();
@@ -39,6 +43,8 @@ app.use('/settings', settingsRouter);
 app.use('/departments', departmentsRouter);
 app.use('/roles', rolesRouter);
 app.use('/org-users', orgUsersRouter);
+app.use('/self-registration', selfRegistrationRouter);
+app.use('/public/self-registration', publicSelfRegistrationRouter);
 
 app.use(errorHandler);
 

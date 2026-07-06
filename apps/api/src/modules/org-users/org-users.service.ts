@@ -9,6 +9,7 @@ import type {
   OrgUsersResponse,
   OrgUserPickerDto,
   OrgUserStats,
+  UpdateOrgUserRequest,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
@@ -76,12 +77,13 @@ export async function listOrgUserOptions(tenantId: string): Promise<OrgUserPicke
 }
 
 export async function getOrgUserStats(tenantId: string): Promise<OrgUserStats> {
-  const [active, inactive, departments] = await Promise.all([
+  const [active, inactive, pending, departments] = await Promise.all([
     prisma.user.count({ where: { tenantId, status: UserStatus.Active } }),
     prisma.user.count({ where: { tenantId, status: UserStatus.Inactive } }),
+    prisma.user.count({ where: { tenantId, status: UserStatus.Pending } }),
     prisma.department.count({ where: { tenantId } }),
   ]);
-  return { active, inactive, departments };
+  return { active, inactive, pending, departments };
 }
 
 /** Every id must reference a record of the given model within this tenant. */
@@ -151,6 +153,60 @@ export async function createOrgUser(
   return toDto(created);
 }
 
+export async function updateOrgUser(
+  tenantId: string,
+  id: string,
+  actorId: string,
+  input: UpdateOrgUserRequest,
+): Promise<OrgUserDto> {
+  const existing = await prisma.user.findUnique({
+    where: { id },
+    include: { roles: { select: { roleId: true } }, departments: { select: { departmentId: true } } },
+  });
+  if (!existing || existing.tenantId !== tenantId) throw new HttpError(404, 'User not found');
+
+  const roleIds = await assertTenantScoped(tenantId, input.roleIds, 'role', 'roles');
+  const departmentIds = await assertTenantScoped(
+    tenantId,
+    input.departmentIds,
+    'department',
+    'departments',
+  );
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.update({
+      where: { id },
+      data: {
+        name: input.name,
+        roles: { deleteMany: {}, create: roleIds.map((roleId) => ({ roleId })) },
+        departments: {
+          deleteMany: {},
+          create: departmentIds.map((departmentId) => ({ departmentId })),
+        },
+      },
+      include: withRolesAndDepartments,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: id,
+        action: 'update',
+        before: {
+          name: existing.name,
+          roleIds: existing.roles.map((r) => r.roleId),
+          departmentIds: existing.departments.map((d) => d.departmentId),
+        },
+        after: { name: user.name, roleIds, departmentIds },
+      },
+    });
+    return user;
+  });
+
+  return toDto(updated);
+}
+
 async function findTenantUser(tenantId: string, id: string) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user || user.tenantId !== tenantId) throw new HttpError(404, 'User not found');
@@ -218,6 +274,64 @@ export async function reactivateOrgUser(
   });
 
   return toDto(updated);
+}
+
+/** Approve a pending self-registration → the user becomes Active and can log in. */
+export async function approveOrgUser(
+  tenantId: string,
+  id: string,
+  actorId: string,
+): Promise<OrgUserDto> {
+  const user = await findTenantUser(tenantId, id);
+  if (user.status !== UserStatus.Pending) {
+    throw new HttpError(409, 'Only a pending self-registration can be approved');
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.user.update({
+      where: { id },
+      data: { status: UserStatus.Active },
+      include: withRolesAndDepartments,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: id,
+        action: 'approve',
+        before: { status: user.status },
+        after: { status: UserStatus.Active },
+      },
+    });
+    return u;
+  });
+
+  return toDto(updated);
+}
+
+/** Reject a pending self-registration → the request is discarded, freeing the email. */
+export async function rejectOrgUser(tenantId: string, id: string, actorId: string): Promise<void> {
+  const user = await findTenantUser(tenantId, id);
+  if (user.status !== UserStatus.Pending) {
+    throw new HttpError(409, 'Only a pending self-registration can be rejected');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.userRole.deleteMany({ where: { userId: id } });
+    await tx.userDepartment.deleteMany({ where: { userId: id } });
+    await tx.user.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: id,
+        action: 'reject_self_registration',
+        before: { name: user.name, email: user.email },
+      },
+    });
+  });
 }
 
 export async function resetOrgUserPassword(

@@ -11,6 +11,10 @@ import {
   Check,
   KeyRound,
   Copy,
+  Link2,
+  RefreshCw,
+  ShieldCheck,
+  PencilLine,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -21,7 +25,9 @@ import {
   type OrgUserDto,
   type OrgUsersResponse,
   type OrgUserStats,
+  type RegistrationLinkDto,
   type RolesResponse,
+  type UpdateOrgUserRequest,
 } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -302,6 +308,267 @@ function AddUserModal({
   );
 }
 
+function EditUserModal({
+  user,
+  roles,
+  departments,
+  onClose,
+  onSaved,
+}: {
+  user: OrgUserDto;
+  roles: { id: string; name: string }[];
+  departments: { id: string; name: string }[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = React.useState(user.name);
+  const [roleIds, setRoleIds] = React.useState<Set<string>>(new Set(user.roles.map((r) => r.id)));
+  const [departmentIds, setDepartmentIds] = React.useState<Set<string>>(
+    new Set(user.departments.map((d) => d.id)),
+  );
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  function toggle(set: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) {
+    set((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function onSave() {
+    setError(null);
+    if (!name.trim()) return setError('Name is required.');
+    setBusy(true);
+    try {
+      const body: UpdateOrgUserRequest = {
+        name,
+        roleIds: [...roleIds],
+        departmentIds: [...departmentIds],
+      };
+      await apiFetch(`/org-users/${user.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to update the user.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Overlay onClose={onClose} z={60}>
+      <div className="mx-auto flex max-h-[88vh] w-full max-w-[480px] flex-col rounded-2xl bg-surface shadow-xl">
+        <div className="flex items-center gap-3 px-[26px] pt-[26px]">
+          <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-[rgb(236,245,246)] text-brand">
+            <PencilLine size={20} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-lg font-bold text-ink-900">Edit user</div>
+            <div className="truncate text-[12.5px] text-ink-400">{user.email}</div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-[26px] py-5">
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-semibold text-ink-900">Full name</span>
+            <div className="flex h-11 items-center rounded-sm border border-line bg-surface px-3">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
+              />
+            </div>
+          </label>
+
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-ink-900">Roles</span>
+              <MultiSelect
+                options={roles}
+                selected={roleIds}
+                onToggle={(id) => toggle(setRoleIds, id)}
+                emptyNote="No roles yet."
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-ink-900">Departments</span>
+              <MultiSelect
+                options={departments}
+                selected={departmentIds}
+                onToggle={(id) => toggle(setDepartmentIds, id)}
+                emptyNote="No departments yet."
+              />
+            </div>
+          </div>
+
+          {error && <div className="mt-4 text-sm font-medium text-danger">{error}</div>}
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-line-soft px-[26px] py-[18px]">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={onSave} disabled={busy}>
+            <Check size={16} />
+            {busy ? 'Saving…' : 'Save changes'}
+          </Button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+const EXPIRY_OPTIONS = [
+  { minutes: 30, label: '30 minutes' },
+  { minutes: 120, label: '2 hours' },
+  { minutes: 1440, label: '24 hours' },
+  { minutes: 10080, label: '7 days' },
+];
+
+function InviteLinkModal({ onClose }: { onClose: () => void }) {
+  const [link, setLink] = React.useState<RegistrationLinkDto | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [expiryMinutes, setExpiryMinutes] = React.useState(30);
+  const [busy, setBusy] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    apiFetch<RegistrationLinkDto | null>('/self-registration')
+      .then(setLink)
+      .catch(() => setLink(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const active = link && !link.expired;
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiFetch<RegistrationLinkDto>('/self-registration', {
+        method: 'POST',
+        body: JSON.stringify({ expiryMinutes }),
+      });
+      setLink(res);
+      setCopied(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to generate the link.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch('/self-registration', { method: 'DELETE' });
+      setLink(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to revoke the link.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!link) return;
+    await navigator.clipboard.writeText(link.url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <Overlay onClose={onClose} z={60}>
+      <div className="mx-auto w-full max-w-[480px] rounded-2xl bg-surface p-[26px] shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-[rgb(236,245,246)] text-brand">
+            <Link2 size={20} />
+          </div>
+          <div>
+            <div className="text-lg font-bold text-ink-900">Self-registration link</div>
+            <div className="text-[12.5px] text-ink-400">
+              Anyone with the link joins as an Employee until it expires.
+            </div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-sm text-ink-400">Loading…</div>
+        ) : active ? (
+          <div className="mt-5">
+            <span className="text-sm font-semibold text-ink-900">Shareable link</span>
+            <div className="mt-2 flex items-center gap-2 rounded-sm border border-line bg-app-bg px-3 py-[10px]">
+              <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink-700">
+                {link.url}
+              </span>
+              <Button variant="secondary" size="sm" onClick={copy}>
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <div className="mt-3 flex items-start gap-[10px] rounded-sm bg-[rgb(236,245,246)] px-[15px] py-[11px]">
+              <ShieldCheck size={16} className="mt-[1px] flex-none text-brand" />
+              <span className="text-[12.5px] leading-[1.5] text-ink-500">
+                Expires {new Date(link.expiresAt).toLocaleString()}. Revoke it anytime, or
+                regenerate to replace it.
+              </span>
+            </div>
+            {error && <div className="mt-3 text-sm font-medium text-danger">{error}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="danger" onClick={revoke} disabled={busy}>
+                {busy ? 'Working…' : 'Revoke'}
+              </Button>
+              <Button variant="secondary" onClick={generate} disabled={busy}>
+                <RefreshCw size={15} />
+                Regenerate
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5">
+            {link && link.expired && (
+              <div className="mb-4 rounded-sm bg-[rgba(247,107,21,.1)] px-[15px] py-[11px] text-[12.5px] leading-[1.5] text-warning">
+                The previous link has expired. Generate a new one to invite employees.
+              </div>
+            )}
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-ink-900">Link expires after</span>
+              <div className="relative flex items-center">
+                <select
+                  value={expiryMinutes}
+                  onChange={(e) => setExpiryMinutes(Number(e.target.value))}
+                  className="h-11 w-full appearance-none rounded-sm border border-line bg-surface py-0 pl-3 pr-9 text-sm text-ink-900 outline-none"
+                >
+                  {EXPIRY_OPTIONS.map((o) => (
+                    <option key={o.minutes} value={o.minutes}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={18} className="pointer-events-none absolute right-3 text-ink-400" />
+              </div>
+            </label>
+            {error && <div className="mt-3 text-sm font-medium text-danger">{error}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button onClick={generate} disabled={busy}>
+                <Link2 size={16} />
+                {busy ? 'Generating…' : 'Generate link'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Overlay>
+  );
+}
+
 export default function OrgUsers() {
   const { user } = useAuth();
   const [rows, setRows] = React.useState<OrgUserDto[]>([]);
@@ -317,7 +584,10 @@ export default function OrgUsers() {
   const [roles, setRoles] = React.useState<{ id: string; name: string }[]>([]);
   const [departments, setDepartments] = React.useState<{ id: string; name: string }[]>([]);
   const [adding, setAdding] = React.useState(false);
+  const [editing, setEditing] = React.useState<OrgUserDto | null>(null);
+  const [linkModalOpen, setLinkModalOpen] = React.useState(false);
   const [deactivating, setDeactivating] = React.useState<OrgUserDto | null>(null);
+  const [rejecting, setRejecting] = React.useState<OrgUserDto | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [resetResult, setResetResult] = React.useState<{ user: OrgUserDto; password: string } | null>(
@@ -387,6 +657,31 @@ export default function OrgUsers() {
     }
   }
 
+  async function onApprove(u: OrgUserDto) {
+    setBusyId(u.id);
+    try {
+      await apiFetch(`/org-users/${u.id}/approve`, { method: 'POST' });
+      load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onConfirmReject() {
+    if (!rejecting) return;
+    setBusyId(rejecting.id);
+    setActionError(null);
+    try {
+      await apiFetch(`/org-users/${rejecting.id}/reject`, { method: 'POST' });
+      setRejecting(null);
+      load();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Unable to reject the request.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function onResetPassword(u: OrgUserDto) {
     setBusyId(u.id);
     try {
@@ -401,9 +696,10 @@ export default function OrgUsers() {
   }
 
   const STATUS_FILTERS = [
-    { value: '', label: 'All' },
-    { value: userStatus.enum.Active, label: 'Active' },
-    { value: userStatus.enum.Inactive, label: 'Deactivated' },
+    { value: '', label: 'All', badge: 0 },
+    { value: userStatus.enum.Active, label: 'Active', badge: 0 },
+    { value: userStatus.enum.Pending, label: 'Pending', badge: stats?.pending ?? 0 },
+    { value: userStatus.enum.Inactive, label: 'Deactivated', badge: 0 },
   ];
 
   return (
@@ -414,10 +710,16 @@ export default function OrgUsers() {
           subtitle="Invite people, assign departments and roles, and deactivate access. Accounts activate without an email step."
           breadcrumb={`Organization · ${user?.tenantName ?? ''}`}
         />
-        <Button size="lg" onClick={() => setAdding(true)}>
-          <UserPlus size={18} />
-          Add User
-        </Button>
+        <div className="flex gap-3">
+          <Button variant="secondary" size="lg" onClick={() => setLinkModalOpen(true)}>
+            <Link2 size={18} />
+            Share invite link
+          </Button>
+          <Button size="lg" onClick={() => setAdding(true)}>
+            <UserPlus size={18} />
+            Add User
+          </Button>
+        </div>
       </div>
 
       <div className="mt-[22px] grid max-w-[640px] grid-cols-3 gap-[18px]">
@@ -447,13 +749,22 @@ export default function OrgUsers() {
                 setStatus(f.value);
                 setPage(1);
               }}
-              className={`rounded-lg border px-[13px] py-[7px] text-[12.5px] font-semibold transition-colors ${
+              className={`inline-flex items-center gap-[6px] rounded-lg border px-[13px] py-[7px] text-[12.5px] font-semibold transition-colors ${
                 status === f.value
                   ? 'border-brand bg-brand text-white'
                   : 'border-line-soft bg-surface text-ink-500 hover:bg-surface-muted'
               }`}
             >
               {f.label}
+              {f.badge > 0 && (
+                <span
+                  className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-[5px] text-[11px] font-bold ${
+                    status === f.value ? 'bg-white/25 text-white' : 'bg-warning/15 text-warning'
+                  }`}
+                >
+                  {f.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -517,8 +828,44 @@ export default function OrgUsers() {
               <StatusBadge status={u.status} />
             </span>
             <div className="flex justify-end gap-2">
-              {u.status === userStatus.enum.Active ? (
+              {u.status === userStatus.enum.Pending ? (
                 <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setEditing(u)}
+                    disabled={busyId === u.id}
+                    aria-label={`Edit ${u.name}`}
+                  >
+                    <PencilLine size={14} />
+                  </Button>
+                  <Button size="sm" onClick={() => onApprove(u)} disabled={busyId === u.id}>
+                    <Check size={14} />
+                    {busyId === u.id ? 'Approving…' : 'Approve'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setRejecting(u);
+                      setActionError(null);
+                    }}
+                    disabled={busyId === u.id}
+                  >
+                    Reject
+                  </Button>
+                </>
+              ) : u.status === userStatus.enum.Active ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setEditing(u)}
+                    disabled={busyId === u.id}
+                    aria-label={`Edit ${u.name}`}
+                  >
+                    <PencilLine size={14} />
+                  </Button>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -599,6 +946,21 @@ export default function OrgUsers() {
         />
       )}
 
+      {linkModalOpen && <InviteLinkModal onClose={() => setLinkModalOpen(false)} />}
+
+      {editing && (
+        <EditUserModal
+          user={editing}
+          roles={roles}
+          departments={departments}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+
       {deactivating && (
         <Overlay onClose={() => setDeactivating(null)} z={60}>
           <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
@@ -619,6 +981,33 @@ export default function OrgUsers() {
               </Button>
               <Button variant="danger" onClick={onConfirmDeactivate} disabled={busyId === deactivating.id}>
                 {busyId === deactivating.id ? 'Deactivating…' : 'Deactivate'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
+      {rejecting && (
+        <Overlay onClose={() => setRejecting(null)} z={60}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-danger/[0.12] text-danger">
+                <UserX size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Reject request</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Reject <strong>{rejecting.name}</strong>&apos;s request to join? Their self-registration
+              is discarded and the email <strong>{rejecting.email}</strong> is freed to register
+              again.
+            </div>
+            {actionError && <div className="mt-3 text-sm font-medium text-danger">{actionError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setRejecting(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={onConfirmReject} disabled={busyId === rejecting.id}>
+                {busyId === rejecting.id ? 'Rejecting…' : 'Reject request'}
               </Button>
             </div>
           </div>

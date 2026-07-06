@@ -5,6 +5,7 @@ import Register from '@/pages/Register';
 import ChangePassword from '@/pages/ChangePassword';
 import ForgotPassword from '@/pages/ForgotPassword';
 import SetNewPassword from '@/pages/SetNewPassword';
+import Join from '@/pages/Join';
 import Profile from '@/pages/Profile';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { RequireRole } from '@/components/RequireRole';
@@ -37,6 +38,7 @@ export default function App() {
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<SetNewPassword />} />
+      <Route path="/join/:token" element={<Join />} />
       <Route
         path="/change-password"
         element={
