@@ -47,9 +47,9 @@
 
 ## 9. Verify
 
-- [ ] 9.1 A user with System Admin + Enterprise Admin roles sees both sidebars' sections; an Employee sees neither admin section
-- [ ] 9.2 Accepting a new enterprise seeds System roles + default departments
-- [ ] 9.3 Admin-created user must change password on first login; deactivated user cannot log in
-- [ ] 9.4 Self-registration link works until expiry/revocation and lands an Employee
-- [ ] 9.5 Deleting a department with users is blocked with an archive offer; an empty one deletes
-- [ ] 9.6 Every master mutation appears in the Audit Log
+- [x] 9.1 Verified: Enterprise Admin sees only ORGANIZATION; System Admin sees only PLATFORM + SYSTEM; an Employee sees no admin sections (role-union sidebar). Employees with no admin section now land on a neutral member-home placeholder instead of the System-Admin Overview (fix surfaced by this check).
+- [x] 9.2 Verified: an accepted enterprise has the 7 seeded System roles + 6 default departments.
+- [x] 9.3 Verified: an admin-created user logs in with `mustChangePassword=true`; a deactivated user's login is refused (403).
+- [x] 9.4 Verified: a self-registration link creates a Pending Employee (awaiting approval); after revoke the link returns 410.
+- [x] 9.5 Verified: deleting a department with a member is blocked (409, names the dependency), archiving it works as the alternative, and an empty department deletes (204).
+- [x] 9.6 Verified: the Audit Log captures every master mutation — create/update/delete/archive/unarchive for departments, roles, projects; create/deactivate/reactivate/approve/reject/remove/reset/self_register for users; accept for tenants; generate/revoke for registration links.

@@ -1,5 +1,6 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Link } from 'react-router-dom';
 import { SystemRoleKey } from '@se/shared';
+import { PageHeader } from '@/components/shell/PageHeader';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import ChangePassword from '@/pages/ChangePassword';
@@ -22,13 +23,36 @@ import Roles from '@/pages/organization/Roles';
 import Projects from '@/pages/organization/Projects';
 import { useAuth } from '@/lib/auth';
 
-/** The System Admin's Overview dashboard has no Enterprise Admin equivalent yet — route them into Organization instead. */
+/** Landing routes each persona to their home. Employee request screens land in a later change. */
 function Home() {
   const { user } = useAuth();
-  if (!user?.isSystemAdmin && user?.roles.includes(SystemRoleKey.EnterpriseAdmin)) {
+  if (user?.isSystemAdmin) return <Overview />;
+  if (user?.roles.includes(SystemRoleKey.EnterpriseAdmin)) {
     return <Navigate to="/organization/users" replace />;
   }
-  return <Overview />;
+  return <MemberHome />;
+}
+
+/** Placeholder home for members with no admin section yet (request screens arrive in a later change). */
+function MemberHome() {
+  const { user } = useAuth();
+  return (
+    <>
+      <PageHeader
+        title={`Welcome, ${user?.name?.split(' ')[0] ?? ''}`.trim()}
+        subtitle="Your request workspace is being set up."
+        breadcrumb={user?.tenantName ?? 'Workspace'}
+      />
+      <div className="mt-6 rounded-lg border border-dashed border-line bg-surface p-12 text-center text-sm text-ink-400">
+        Request forms (Leave, WFH, Visitor, IT) will appear here soon. In the meantime you can
+        update your details from{' '}
+        <Link to="/profile" className="font-semibold text-brand-hover">
+          your profile
+        </Link>
+        .
+      </div>
+    </>
+  );
 }
 
 export default function App() {
