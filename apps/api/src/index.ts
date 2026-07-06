@@ -11,6 +11,7 @@ import { usersRouter } from './modules/users/users.routes.js';
 import { auditLogRouter } from './modules/audit-log/audit-log.routes.js';
 import { settingsRouter } from './modules/settings/settings.routes.js';
 import { departmentsRouter } from './modules/departments/departments.routes.js';
+import { rolesRouter } from './modules/roles/roles.routes.js';
 import { orgUsersRouter } from './modules/org-users/org-users.routes.js';
 import { errorHandler } from './middleware/error.js';
 
@@ -36,6 +37,7 @@ app.use('/users', usersRouter);
 app.use('/audit-log', auditLogRouter);
 app.use('/settings', settingsRouter);
 app.use('/departments', departmentsRouter);
+app.use('/roles', rolesRouter);
 app.use('/org-users', orgUsersRouter);
 
 app.use(errorHandler);

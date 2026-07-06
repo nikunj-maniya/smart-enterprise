@@ -102,7 +102,7 @@ model User {
   requests          Request[]
   registration      EnterpriseRegistration?
   resetTokens       PasswordResetToken[]
-  headOfDepartments Department[]         @relation("DepartmentHead")
+  departmentHeads   DepartmentHead[]
 
   @@index([tenantId])
 }
@@ -128,6 +128,7 @@ model Role {
   key         String
   name        String
   permissions String[]
+  isSystem    Boolean  @default(false) // seeded System roles: renamable, permissions fixed, undeletable
 
   tenant Tenant     @relation(fields: [tenantId], references: [id])
   users  UserRole[]
@@ -147,17 +148,27 @@ model UserRole {
 }
 
 model Department {
-  id         String  @id @default(cuid())
-  tenantId   String
-  name       String
-  headUserId String?
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
 
   tenant Tenant           @relation(fields: [tenantId], references: [id])
-  head   User?            @relation("DepartmentHead", fields: [headUserId], references: [id])
+  heads  DepartmentHead[]
   users  UserDepartment[]
 
   @@index([tenantId])
-  @@index([headUserId])
+}
+
+// A department can have multiple heads (leads) — join table between Department and User.
+model DepartmentHead {
+  departmentId String
+  userId       String
+
+  department Department @relation(fields: [departmentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@id([departmentId, userId])
+  @@index([userId])
 }
 
 model UserDepartment {
