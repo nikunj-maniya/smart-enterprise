@@ -14,6 +14,7 @@ import {
   Link2,
   RefreshCw,
   ShieldCheck,
+  PencilLine,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -26,6 +27,7 @@ import {
   type OrgUserStats,
   type RegistrationLinkDto,
   type RolesResponse,
+  type UpdateOrgUserRequest,
 } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -306,6 +308,118 @@ function AddUserModal({
   );
 }
 
+function EditUserModal({
+  user,
+  roles,
+  departments,
+  onClose,
+  onSaved,
+}: {
+  user: OrgUserDto;
+  roles: { id: string; name: string }[];
+  departments: { id: string; name: string }[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = React.useState(user.name);
+  const [roleIds, setRoleIds] = React.useState<Set<string>>(new Set(user.roles.map((r) => r.id)));
+  const [departmentIds, setDepartmentIds] = React.useState<Set<string>>(
+    new Set(user.departments.map((d) => d.id)),
+  );
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  function toggle(set: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) {
+    set((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function onSave() {
+    setError(null);
+    if (!name.trim()) return setError('Name is required.');
+    setBusy(true);
+    try {
+      const body: UpdateOrgUserRequest = {
+        name,
+        roleIds: [...roleIds],
+        departmentIds: [...departmentIds],
+      };
+      await apiFetch(`/org-users/${user.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to update the user.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Overlay onClose={onClose} z={60}>
+      <div className="mx-auto flex max-h-[88vh] w-full max-w-[480px] flex-col rounded-2xl bg-surface shadow-xl">
+        <div className="flex items-center gap-3 px-[26px] pt-[26px]">
+          <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-[rgb(236,245,246)] text-brand">
+            <PencilLine size={20} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-lg font-bold text-ink-900">Edit user</div>
+            <div className="truncate text-[12.5px] text-ink-400">{user.email}</div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-[26px] py-5">
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-semibold text-ink-900">Full name</span>
+            <div className="flex h-11 items-center rounded-sm border border-line bg-surface px-3">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
+              />
+            </div>
+          </label>
+
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-ink-900">Roles</span>
+              <MultiSelect
+                options={roles}
+                selected={roleIds}
+                onToggle={(id) => toggle(setRoleIds, id)}
+                emptyNote="No roles yet."
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-ink-900">Departments</span>
+              <MultiSelect
+                options={departments}
+                selected={departmentIds}
+                onToggle={(id) => toggle(setDepartmentIds, id)}
+                emptyNote="No departments yet."
+              />
+            </div>
+          </div>
+
+          {error && <div className="mt-4 text-sm font-medium text-danger">{error}</div>}
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-line-soft px-[26px] py-[18px]">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={onSave} disabled={busy}>
+            <Check size={16} />
+            {busy ? 'Saving…' : 'Save changes'}
+          </Button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 const EXPIRY_OPTIONS = [
   { minutes: 30, label: '30 minutes' },
   { minutes: 120, label: '2 hours' },
@@ -470,6 +584,7 @@ export default function OrgUsers() {
   const [roles, setRoles] = React.useState<{ id: string; name: string }[]>([]);
   const [departments, setDepartments] = React.useState<{ id: string; name: string }[]>([]);
   const [adding, setAdding] = React.useState(false);
+  const [editing, setEditing] = React.useState<OrgUserDto | null>(null);
   const [linkModalOpen, setLinkModalOpen] = React.useState(false);
   const [deactivating, setDeactivating] = React.useState<OrgUserDto | null>(null);
   const [rejecting, setRejecting] = React.useState<OrgUserDto | null>(null);
@@ -715,6 +830,15 @@ export default function OrgUsers() {
             <div className="flex justify-end gap-2">
               {u.status === userStatus.enum.Pending ? (
                 <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setEditing(u)}
+                    disabled={busyId === u.id}
+                    aria-label={`Edit ${u.name}`}
+                  >
+                    <PencilLine size={14} />
+                  </Button>
                   <Button size="sm" onClick={() => onApprove(u)} disabled={busyId === u.id}>
                     <Check size={14} />
                     {busyId === u.id ? 'Approving…' : 'Approve'}
@@ -733,6 +857,15 @@ export default function OrgUsers() {
                 </>
               ) : u.status === userStatus.enum.Active ? (
                 <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setEditing(u)}
+                    disabled={busyId === u.id}
+                    aria-label={`Edit ${u.name}`}
+                  >
+                    <PencilLine size={14} />
+                  </Button>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -814,6 +947,19 @@ export default function OrgUsers() {
       )}
 
       {linkModalOpen && <InviteLinkModal onClose={() => setLinkModalOpen(false)} />}
+
+      {editing && (
+        <EditUserModal
+          user={editing}
+          roles={roles}
+          departments={departments}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
 
       {deactivating && (
         <Overlay onClose={() => setDeactivating(null)} z={60}>

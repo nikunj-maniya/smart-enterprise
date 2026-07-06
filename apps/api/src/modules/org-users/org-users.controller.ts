@@ -1,5 +1,9 @@
 import type { Request, Response, NextFunction } from 'express';
-import { createOrgUserRequestSchema, orgUsersQuerySchema } from '@se/shared';
+import {
+  createOrgUserRequestSchema,
+  orgUsersQuerySchema,
+  updateOrgUserRequestSchema,
+} from '@se/shared';
 import * as orgUsersService from './org-users.service.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
@@ -56,6 +60,21 @@ export async function reactivate(req: Request, res: Response, next: NextFunction
       req.user!.tenantId!,
       req.params.id,
       req.user!.id,
+    );
+    res.json(user);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function update(req: Request, res: Response, next: NextFunction) {
+  try {
+    const input = updateOrgUserRequestSchema.parse(req.body);
+    const user = await orgUsersService.updateOrgUser(
+      req.user!.tenantId!,
+      req.params.id,
+      req.user!.id,
+      input,
     );
     res.json(user);
   } catch (err) {

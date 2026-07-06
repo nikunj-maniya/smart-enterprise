@@ -570,6 +570,14 @@ export const createOrgUserRequestSchema = z.object({
 });
 export type CreateOrgUserRequest = z.infer<typeof createOrgUserRequestSchema>;
 
+/** Admin edits an existing user's name, roles, and departments (not email/password). */
+export const updateOrgUserRequestSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  roleIds: z.array(z.string()).default([]),
+  departmentIds: z.array(z.string()).default([]),
+});
+export type UpdateOrgUserRequest = z.infer<typeof updateOrgUserRequestSchema>;
+
 // ── Self-registration link (org-masters, tenant-scoped) ────────
 /** Admin view of the current self-registration link. */
 export const registrationLinkSchema = z.object({
