@@ -662,6 +662,87 @@ export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 export const updateProjectRequestSchema = createProjectRequestSchema;
 export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;
 
+// ── Form metadata API (form-engine, tenant-scoped) — PRD §6 ────
+/** Light list row: latest published version per form key. */
+export const formDefinitionSummarySchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  version: z.number().int(),
+  renderer: z.enum(['core', 'generic']),
+  status: z.enum(['draft', 'published', 'archived']),
+});
+export type FormDefinitionSummaryDto = z.infer<typeof formDefinitionSummarySchema>;
+
+/** A field as served for rendering (only the columns the FormField row carries). */
+export const formFieldDtoSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  type: z.string(),
+  required: z.boolean(),
+  options: z.unknown().nullable(),
+  validation: z.unknown().nullable(),
+  visibilityRule: z.unknown().nullable(),
+});
+export type FormFieldDto = z.infer<typeof formFieldDtoSchema>;
+
+export const formSectionDtoSchema = z.object({
+  order: z.number().int(),
+  title: z.string(),
+  visibilityRule: z.unknown().nullable(),
+  fields: z.array(formFieldDtoSchema),
+});
+export type FormSectionDto = z.infer<typeof formSectionDtoSchema>;
+
+export const formApprovalWorkflowDtoSchema = z.object({
+  mode: z.string(),
+  stageRules: z.unknown().nullable(),
+});
+export type FormApprovalWorkflowDto = z.infer<typeof formApprovalWorkflowDtoSchema>;
+
+export const formStatusModelDtoSchema = z.object({
+  states: z.unknown(),
+  transitions: z.unknown(),
+});
+export type FormStatusModelDto = z.infer<typeof formStatusModelDtoSchema>;
+
+/** Full latest-published definition served to the renderer. */
+export const formDefinitionDtoSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  title: z.string(),
+  version: z.number().int(),
+  renderer: z.enum(['core', 'generic']),
+  status: z.enum(['draft', 'published', 'archived']),
+  sections: z.array(formSectionDtoSchema),
+  approvalWorkflow: formApprovalWorkflowDtoSchema.nullable(),
+  statusModel: formStatusModelDtoSchema.nullable(),
+});
+export type FormDefinitionDto = z.infer<typeof formDefinitionDtoSchema>;
+
+/** Publish body — the form key comes from the URL, version/renderer/status are server-managed.
+ *  `sections` stays loose here so the shared `parseDefinition` can reject an unsupported field
+ *  type with a message that names the offending field (rather than an opaque enum error). */
+export const publishApprovalWorkflowSchema = z.object({
+  mode: z.string().default('parallel'),
+  stageRules: z.unknown().optional(),
+});
+export const publishStatusModelSchema = z.object({
+  states: z.unknown(),
+  transitions: z.unknown(),
+});
+export const publishFormRequestSchema = z.object({
+  title: z.string().min(1, 'Title is required'),
+  sections: z.array(z.unknown()),
+  approvalWorkflow: publishApprovalWorkflowSchema.optional(),
+  statusModel: publishStatusModelSchema.optional(),
+});
+export type PublishFormRequest = z.infer<typeof publishFormRequestSchema>;
+
+/** Reusable service input — the HTTP body plus the key (Slice 3's seed calls the service directly). */
+export interface PublishDefinitionInput extends PublishFormRequest {
+  key: string;
+}
+
 // ── Profile (self-service, any authenticated user) ─────────────
 export const profileSchema = z.object({
   id: z.string(),
