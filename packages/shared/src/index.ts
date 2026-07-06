@@ -605,3 +605,46 @@ export const selfRegisterRequestSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 export type SelfRegisterRequest = z.infer<typeof selfRegisterRequestSchema>;
+
+// ── Projects master (org-masters, tenant-scoped) ───────────────
+export const projectStatus = z.enum(['active', 'archived']);
+export type ProjectStatus = z.infer<typeof projectStatus>;
+
+export const projectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: projectStatus,
+  pm: orgUserRefSchema.nullable(),
+  techLead: orgUserRefSchema.nullable(),
+  members: z.array(orgUserRefSchema),
+  memberCount: z.number(),
+});
+export type ProjectDto = z.infer<typeof projectSchema>;
+
+export const projectsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().optional(),
+  status: projectStatus.optional(),
+});
+export type ProjectsQuery = z.infer<typeof projectsQuerySchema>;
+
+export const projectsResponseSchema = z.object({
+  rows: z.array(projectSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type ProjectsResponse = z.infer<typeof projectsResponseSchema>;
+
+export const createProjectRequestSchema = z.object({
+  name: z.string().min(1, 'Project name is required'),
+  status: projectStatus.default('active'),
+  pmUserId: z.string().nullable().default(null),
+  techLeadUserId: z.string().nullable().default(null),
+  memberIds: z.array(z.string()).default([]),
+});
+export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
+
+export const updateProjectRequestSchema = createProjectRequestSchema;
+export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;

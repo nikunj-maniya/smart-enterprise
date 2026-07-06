@@ -17,7 +17,8 @@ export async function list(req: Request, res: Response, next: NextFunction) {
 
 export async function options(req: Request, res: Response, next: NextFunction) {
   try {
-    res.json(await orgUsersService.listOrgUserOptions(req.user!.tenantId!));
+    const role = typeof req.query.role === 'string' ? req.query.role : undefined;
+    res.json(await orgUsersService.listOrgUserOptions(req.user!.tenantId!, role));
   } catch (err) {
     next(err);
   }
@@ -49,6 +50,15 @@ export async function deactivate(req: Request, res: Response, next: NextFunction
       req.user!.id,
     );
     res.json(user);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function remove(req: Request, res: Response, next: NextFunction) {
+  try {
+    await orgUsersService.deleteOrgUser(req.user!.tenantId!, req.params.id, req.user!.id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

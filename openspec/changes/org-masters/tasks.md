@@ -6,7 +6,7 @@
 
 ## 2. Departments Master
 
-- [x] 2.1 Tenant-scoped Department Create/List/Update API (Zod-validated, audited) _(Slice 2)_. Delete deferred to Slice 7 — the prototype has no delete action on any master (Departments/Roles/Projects), matching "Referential-integrity on master-data deletes" being its own slice.
+- [x] 2.1 Tenant-scoped Department Create/List/Update/**Delete** API (Zod-validated, audited) _(Slice 2; delete added per user feedback 2026-07-06)_. `DELETE /departments/:id` with a card trash action + confirm modal; blocked (§5A.1) while users are assigned or requests reference it (its own head rows are cleared on delete).
 - [x] 2.2 Departments page: card grid, search, empty state, pagination — match the design exactly _(Slice 2)_
 - [x] 2.3 Department create/edit via the entity modal (name, heads) _(Slice 2; heads made multi-select per user feedback 2026-07-03)_. A department supports **multiple heads** (a `DepartmentHead` join table, replacing the single `headUserId`); the modal is a multi-select and the card lists all heads. Members count is a real computed value (UserDepartment count, 0 until Slice 4 ships user↔department assignment) rather than the prototype mock's free-typed number.
 
@@ -18,7 +18,7 @@
 
 ## 4. User Master
 
-- [x] 4.1 Tenant-scoped user list API + create/deactivate/**reactivate**/reset endpoints (argon2 hash, `resetPassword` flag, audited) _(Slice 4)_. `/org-users` expanded from the Slice 2 picker into the full User Master (list/stats/create/deactivate/reactivate/reset-password); the lightweight picker moved to `/org-users/options`. Reactivate added beyond the prototype's (unwired) intent to avoid a deactivation dead-end, matching the app's suspend/reactivate pattern.
+- [x] 4.1 Tenant-scoped user list API + create/deactivate/**reactivate**/reset/**remove** endpoints (argon2 hash, `resetPassword` flag, audited) _(Slice 4; remove added per user feedback 2026-07-06)_. `/org-users` expanded from the Slice 2 picker into the full User Master (list/stats/create/deactivate/reactivate/reset-password/**delete**); the lightweight picker moved to `/org-users/options` (which also gained a `?role=` filter for the project PM/Tech-Lead pickers). Reactivate added beyond the prototype's (unwired) intent to avoid a deactivation dead-end. `DELETE /org-users/:id` permanently removes a user but is blocked (§5A.1 referential integrity) while they head a department, are on a project, or have submitted requests — deactivate preserves history instead.
 - [x] 4.2 Users page: stat cards, table, search, status filter chips + department dropdown, empty state, pagination _(Slice 4)_. Stat cards show **Active / Deactivated / Departments** — "Invited" from the mock is dropped since D-30 removed the email/invite step (it would always be 0); Deactivated is the real, useful count.
 - [x] 4.3 Add User modal (name, email, password, **multi**-role, **multi**-department) + **Edit-user** modal (name, roles, departments; email read-only) + Deactivate (with confirm) and Reset-password (temp-password modal) row actions, plus Reactivate _(Slice 4; edit added per user feedback 2026-07-06)_. Per PRD §4.2 a user holds one-or-many roles/departments and design.md D-30 ("admin sets initial password, forced change on first login"), the modal supersedes the prototype's single-select/no-password invite mock; the "Send Invite" button label is kept per design.md. Edit lets the admin change any user's roles/departments after creation (e.g. promoting a self-registered Employee) — `PUT /org-users/:id`, tenant-scoped + audited.
 
@@ -30,15 +30,15 @@
 
 ## 6. Projects Master
 
-- [ ] 6.1 Tenant-scoped Project CRUD API with PM/Tech Lead/member assignment (audited) _(Slice 6)_
-- [ ] 6.2 Projects page: table (Project, PM, Tech Lead, Members, Status, Edit), search, filters, pagination _(Slice 6)_
-- [ ] 6.3 Project create/edit modal (name, status, PM, Tech Lead, members) _(Slice 6)_
+- [x] 6.1 Tenant-scoped Project create/list/update/**delete** API with PM/Tech Lead/member assignment, audited _(Slice 6; delete added per user feedback 2026-07-06)_. Adds `Project.status` (active/archived); reuses `ProjectMember.roleInProject` (PM/TL/member). A user holds one slot per project (PK), so PM≠TL is enforced and members exclude whoever is PM/TL. `DELETE /projects/:id` (row trash + confirm) is blocked (§5A.1) while people are assigned (PM/TL/members) or requests reference it — clear those or archive instead.
+- [x] 6.2 Projects page: table (Project, Project Manager, Tech Lead, Members, Status, Edit), search, All/Active/Archived filter chips, pagination — match the design _(Slice 6)_. Status is an **inline dropdown** (change Active⇄Archived directly from the row), not just a static badge (user feedback 2026-07-06).
+- [x] 6.3 Project create/edit modal (name, status, single-select PM, single-select Tech Lead, **multi-select members**) _(Slice 6)_. Members is a real user multi-select (the count in the table is the real `ProjectMember` count) rather than the prototype mock's free-typed number. Per user feedback (2026-07-06): the **PM dropdown lists only Project-Manager-role holders and the Tech Lead dropdown only Tech-Lead-role holders** (via `/org-users/options?role=`), while Members lists all enterprise users except the chosen PM/Lead. The current holder is kept selectable on edit even if their role was later removed.
 
 ## 7. Referential Integrity
 
-- [ ] 7.1 Dependency-count checks blocking deletes across departments/roles/projects, with named reasons _(Slice 7)_
-- [ ] 7.2 `archived` flag + archive action; archived masters hidden from pickers, visible in history _(Slice 7)_
-- [ ] 7.3 Blocked-delete UI: explanation + offer archive/reassign path _(Slice 7)_
+- [x] 7.1 Dependency-count checks blocking deletes across departments/roles/projects (and users), with named reasons _(brought forward into Slices 3/4/6 per user feedback 2026-07-06)_. Roles block on assigned members (System roles undeletable); Departments block on assigned users/requests; Projects block on assigned people/requests; Users block on dept-head/project/requests. All audited.
+- [ ] 7.2 `archived` flag + archive action; archived masters hidden from pickers, visible in history _(Slice 7 — still pending; Projects already have an active/archived status, but a generic archive-instead-of-delete flow for departments/roles is not built)_
+- [x] 7.3 Blocked-delete UI: confirmation modals with explanation + named dependency reason (and, for projects, the archive-instead hint) _(brought forward per user feedback 2026-07-06)_. Delete affordances: role/project row trash, department card trash, user row trash — each with a confirm modal surfacing the API's dependency message on 409.
 
 ## 8. Profile
 

@@ -67,10 +67,20 @@ export async function listOrgUsers(
   return { rows: rows.map(toDto), total, page, pageSize };
 }
 
-/** Lightweight tenant user list for pickers (e.g. department heads). Active users only. */
-export async function listOrgUserOptions(tenantId: string): Promise<OrgUserPickerDto[]> {
+/**
+ * Lightweight tenant user list for pickers (e.g. department heads, project PM/Tech Lead).
+ * Active users only; optionally restricted to holders of a given role key.
+ */
+export async function listOrgUserOptions(
+  tenantId: string,
+  roleKey?: string,
+): Promise<OrgUserPickerDto[]> {
   return prisma.user.findMany({
-    where: { tenantId, status: UserStatus.Active },
+    where: {
+      tenantId,
+      status: UserStatus.Active,
+      ...(roleKey ? { roles: { some: { role: { key: roleKey } } } } : {}),
+    },
     select: { id: true, name: true },
     orderBy: { name: 'asc' },
   });
@@ -211,6 +221,56 @@ async function findTenantUser(tenantId: string, id: string) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user || user.tenantId !== tenantId) throw new HttpError(404, 'User not found');
   return user;
+}
+
+/**
+ * Permanently removes a user. Blocked while they hold structural assignments or have
+ * history that must be preserved (§5A.1 referential integrity) — deactivate those instead.
+ */
+export async function deleteOrgUser(tenantId: string, id: string, actorId: string): Promise<void> {
+  const user = await findTenantUser(tenantId, id);
+  if (user.id === actorId) throw new HttpError(400, 'You cannot remove your own account');
+
+  const [deptHeadCount, projectCount, requestCount] = await Promise.all([
+    prisma.departmentHead.count({ where: { userId: id } }),
+    prisma.projectMember.count({ where: { userId: id } }),
+    prisma.request.count({ where: { requesterId: id } }),
+  ]);
+  if (deptHeadCount > 0) {
+    throw new HttpError(
+      409,
+      `This user heads ${deptHeadCount} department${deptHeadCount === 1 ? '' : 's'}. Reassign the head before removing them.`,
+    );
+  }
+  if (projectCount > 0) {
+    throw new HttpError(
+      409,
+      `This user is assigned to ${projectCount} project${projectCount === 1 ? '' : 's'}. Remove them from those projects first.`,
+    );
+  }
+  if (requestCount > 0) {
+    throw new HttpError(
+      409,
+      'This user has submitted requests. Deactivate them instead so their history stays intact.',
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.userRole.deleteMany({ where: { userId: id } });
+    await tx.userDepartment.deleteMany({ where: { userId: id } });
+    await tx.passwordResetToken.deleteMany({ where: { userId: id } });
+    await tx.user.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: id,
+        action: 'remove',
+        before: { name: user.name, email: user.email },
+      },
+    });
+  });
 }
 
 export async function deactivateOrgUser(

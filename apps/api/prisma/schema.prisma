@@ -200,6 +200,7 @@ model Project {
   id       String @id @default(cuid())
   tenantId String
   name     String
+  status   String @default("active") // active | archived
 
   tenant  Tenant          @relation(fields: [tenantId], references: [id])
   members ProjectMember[]

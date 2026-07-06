@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Search, Building, PencilLine, Plus, Check } from 'lucide-react';
+import { Search, Building, PencilLine, Plus, Check, Trash2 } from 'lucide-react';
 import type {
   CreateDepartmentRequest,
   DepartmentDto,
@@ -12,7 +12,15 @@ import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
-function DepartmentCard({ dept, onEdit }: { dept: DepartmentDto; onEdit: () => void }) {
+function DepartmentCard({
+  dept,
+  onEdit,
+  onDelete,
+}: {
+  dept: DepartmentDto;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const headNames = dept.heads.map((h) => h.name).join(', ');
   return (
     <div className="rounded-[14px] border border-line-soft bg-surface p-5 shadow-card">
@@ -27,6 +35,13 @@ function DepartmentCard({ dept, onEdit }: { dept: DepartmentDto; onEdit: () => v
           aria-label={`Edit ${dept.name}`}
         >
           <PencilLine size={16} />
+        </button>
+        <button
+          className="flex flex-none rounded-[7px] p-[6px] text-ink-400 hover:bg-danger/10 hover:text-danger"
+          onClick={onDelete}
+          aria-label={`Delete ${dept.name}`}
+        >
+          <Trash2 size={16} />
         </button>
       </div>
       <div className="mt-4 flex justify-between gap-3 text-[13px]">
@@ -183,6 +198,9 @@ export default function Departments() {
   const [users, setUsers] = React.useState<OrgUserPickerDto[]>([]);
   const [editing, setEditing] = React.useState<DepartmentDto | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const [deleting, setDeleting] = React.useState<DepartmentDto | null>(null);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
 
   React.useEffect(() => {
     apiFetch<OrgUserPickerDto[]>('/org-users/options').then(setUsers);
@@ -218,6 +236,21 @@ export default function Departments() {
     setEditing(null);
     setCreating(false);
     load();
+  }
+
+  async function onConfirmDelete() {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await apiFetch(`/departments/${deleting.id}`, { method: 'DELETE' });
+      setDeleting(null);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Unable to delete the department.');
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   return (
@@ -257,7 +290,15 @@ export default function Departments() {
       ) : (
         <div className="mt-[18px] grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-[18px]">
           {rows.map((dept) => (
-            <DepartmentCard key={dept.id} dept={dept} onEdit={() => setEditing(dept)} />
+            <DepartmentCard
+              key={dept.id}
+              dept={dept}
+              onEdit={() => setEditing(dept)}
+              onDelete={() => {
+                setDeleting(dept);
+                setDeleteError(null);
+              }}
+            />
           ))}
         </div>
       )}
@@ -298,6 +339,32 @@ export default function Departments() {
           }}
           onSaved={onSaved}
         />
+      )}
+
+      {deleting && (
+        <Overlay onClose={() => setDeleting(null)} z={60}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-danger/[0.12] text-danger">
+                <Trash2 size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Delete department</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Delete <strong>{deleting.name}</strong>? This can&apos;t be undone. A department
+              that still has members assigned can&apos;t be deleted — reassign them first.
+            </div>
+            {deleteError && <div className="mt-3 text-sm font-medium text-danger">{deleteError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setDeleting(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={onConfirmDelete} disabled={deleteBusy}>
+                {deleteBusy ? 'Deleting…' : 'Delete department'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
       )}
     </>
   );
