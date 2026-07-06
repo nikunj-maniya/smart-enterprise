@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './form-engine/index.js';
+
 /** Health-check response shared between API and web. */
 export const healthResponseSchema = z.object({
   status: z.literal('ok'),

@@ -1,8 +1,8 @@
 ## 1. Rule & Validation Engine
 
-- [ ] 1.1 Define the visibility/validation rule grammar (JSON, versioned) + evaluator in `packages/shared` _(Slice 1)_
-- [ ] 1.2 Build the metadata→Zod compiler (types, validation, conditional requiredness, hidden⇒absent) with per-version cache _(Slice 1)_
-- [ ] 1.3 Shared payload fixtures proving renderer and server evaluate rules identically _(Slice 1)_
+- [x] 1.1 Define the visibility/validation rule grammar (JSON, versioned) + evaluator in `packages/shared` _(Slice 1)_ — `rules.ts`: `{ v:1, when }` grammar (eq/neq/gt/gte/lt/lte/in/nin/empty/notEmpty + and/or), `visibilityRuleSchema`, shared `evaluateRule`/`isFieldVisible`
+- [x] 1.2 Build the metadata→Zod compiler (types, validation, conditional requiredness, hidden⇒absent) with per-version cache _(Slice 1)_ — `metadata.ts` (§6.3 field types + `parseDefinition` rejecting unknown types by name) + `compile.ts` (`compileDefinition` cached per `(id,version)`, `validatePayload`)
+- [x] 1.3 Shared payload fixtures proving renderer and server evaluate rules identically _(Slice 1)_ — `fixtures.ts` + `fixtures.test.ts` (node:test, 8/8) run the same shared fns the renderer will use; hidden-field, conditionally-required, type, and option-membership rejects all asserted
 
 ## 2. Form Metadata API
 
