@@ -185,7 +185,7 @@ export default function Departments() {
   const [creating, setCreating] = React.useState(false);
 
   React.useEffect(() => {
-    apiFetch<OrgUserPickerDto[]>('/org-users').then(setUsers);
+    apiFetch<OrgUserPickerDto[]>('/org-users/options').then(setUsers);
   }, []);
 
   React.useEffect(() => {

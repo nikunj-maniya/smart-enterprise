@@ -4,4 +4,11 @@ import * as orgUsersController from './org-users.controller.js';
 
 export const orgUsersRouter: Router = Router();
 
-orgUsersRouter.get('/', requireAuth, requireEnterpriseAdmin, orgUsersController.list);
+orgUsersRouter.use(requireAuth, requireEnterpriseAdmin);
+orgUsersRouter.get('/', orgUsersController.list);
+orgUsersRouter.get('/options', orgUsersController.options);
+orgUsersRouter.get('/stats', orgUsersController.stats);
+orgUsersRouter.post('/', orgUsersController.create);
+orgUsersRouter.post('/:id/deactivate', orgUsersController.deactivate);
+orgUsersRouter.post('/:id/reactivate', orgUsersController.reactivate);
+orgUsersRouter.post('/:id/reset-password', orgUsersController.resetPassword);
