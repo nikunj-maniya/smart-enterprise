@@ -18,9 +18,9 @@
 
 ## 4. User Master
 
-- [ ] 4.1 Tenant-scoped user list API + create/deactivate/reset endpoints (argon2 hash, `resetPassword` flag, audited) _(Slice 4)_
-- [ ] 4.2 Users page: stat cards, table, search, filter chips, empty state, pagination — match the design _(Slice 4)_
-- [ ] 4.3 Add User modal (name, email, password, roles, departments) + Deactivate and Reset-password row actions _(Slice 4)_
+- [x] 4.1 Tenant-scoped user list API + create/deactivate/**reactivate**/reset endpoints (argon2 hash, `resetPassword` flag, audited) _(Slice 4)_. `/org-users` expanded from the Slice 2 picker into the full User Master (list/stats/create/deactivate/reactivate/reset-password); the lightweight picker moved to `/org-users/options`. Reactivate added beyond the prototype's (unwired) intent to avoid a deactivation dead-end, matching the app's suspend/reactivate pattern.
+- [x] 4.2 Users page: stat cards, table, search, status filter chips + department dropdown, empty state, pagination _(Slice 4)_. Stat cards show **Active / Deactivated / Departments** — "Invited" from the mock is dropped since D-30 removed the email/invite step (it would always be 0); Deactivated is the real, useful count.
+- [x] 4.3 Add User modal (name, email, password, **multi**-role, **multi**-department) + Deactivate (with confirm) and Reset-password (temp-password modal) row actions, plus Reactivate _(Slice 4)_. Per PRD §4.2 a user holds one-or-many roles/departments and design.md D-30 ("admin sets initial password, forced change on first login"), the modal supersedes the prototype's single-select/no-password invite mock; the "Send Invite" button label is kept per design.md.
 
 ## 5. Self-Registration Link
 

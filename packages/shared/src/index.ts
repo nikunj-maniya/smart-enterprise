@@ -520,3 +520,51 @@ export function permissionScopeSummary(permissions: string[]): string {
   if (labels.length <= 3) return labels.join(' · ');
   return `${labels.slice(0, 3).join(' · ')} +${labels.length - 3} more`;
 }
+
+// ── User Master (org-masters, tenant-scoped) ───────────────────
+export const orgUserRefSchema = z.object({ id: z.string(), name: z.string() });
+export type OrgUserRef = z.infer<typeof orgUserRefSchema>;
+
+export const orgUserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  status: userStatus,
+  roles: z.array(orgUserRefSchema),
+  departments: z.array(orgUserRefSchema),
+  createdAt: z.string(),
+});
+export type OrgUserDto = z.infer<typeof orgUserSchema>;
+
+export const orgUsersQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().optional(),
+  status: userStatus.optional(),
+  departmentId: z.string().optional(),
+});
+export type OrgUsersQuery = z.infer<typeof orgUsersQuerySchema>;
+
+export const orgUsersResponseSchema = z.object({
+  rows: z.array(orgUserSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type OrgUsersResponse = z.infer<typeof orgUsersResponseSchema>;
+
+export const orgUserStatsSchema = z.object({
+  active: z.number(),
+  inactive: z.number(),
+  departments: z.number(),
+});
+export type OrgUserStats = z.infer<typeof orgUserStatsSchema>;
+
+export const createOrgUserRequestSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  email: z.string().email(),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  roleIds: z.array(z.string()).default([]),
+  departmentIds: z.array(z.string()).default([]),
+});
+export type CreateOrgUserRequest = z.infer<typeof createOrgUserRequestSchema>;
