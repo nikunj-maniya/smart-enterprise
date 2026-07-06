@@ -1,12 +1,241 @@
-import { UserStatus } from '@prisma/client';
-import type { OrgUserPickerDto } from '@se/shared';
+import { randomBytes } from 'node:crypto';
+import argon2 from 'argon2';
+import { Prisma, UserStatus } from '@prisma/client';
+import type {
+  AdminResetPasswordResponse,
+  CreateOrgUserRequest,
+  OrgUserDto,
+  OrgUsersQuery,
+  OrgUsersResponse,
+  OrgUserPickerDto,
+  OrgUserStats,
+} from '@se/shared';
 import { prisma } from '../../prisma.js';
+import { HttpError } from '../../lib/http-error.js';
 
-/** Minimal tenant-scoped user list for pickers (e.g. department head). Full CRUD lands in Slice 4. */
-export async function listOrgUsersForPicker(tenantId: string): Promise<OrgUserPickerDto[]> {
+const withRolesAndDepartments = {
+  roles: { include: { role: { select: { id: true, name: true } } } },
+  departments: { include: { department: { select: { id: true, name: true } } } },
+} as const;
+
+type OrgUserRow = Prisma.UserGetPayload<{ include: typeof withRolesAndDepartments }>;
+
+function toDto(u: OrgUserRow): OrgUserDto {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    status: u.status as OrgUserDto['status'],
+    roles: u.roles.map((r) => ({ id: r.role.id, name: r.role.name })),
+    departments: u.departments.map((d) => ({ id: d.department.id, name: d.department.name })),
+    createdAt: u.createdAt.toISOString(),
+  };
+}
+
+export async function listOrgUsers(
+  tenantId: string,
+  query: OrgUsersQuery,
+): Promise<OrgUsersResponse> {
+  const { page, pageSize, search, status, departmentId } = query;
+
+  const where: Prisma.UserWhereInput = {
+    tenantId,
+    ...(status ? { status: status as UserStatus } : {}),
+    ...(departmentId ? { departments: { some: { departmentId } } } : {}),
+    ...(search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      include: withRolesAndDepartments,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.user.count({ where }),
+  ]);
+
+  return { rows: rows.map(toDto), total, page, pageSize };
+}
+
+/** Lightweight tenant user list for pickers (e.g. department heads). Active users only. */
+export async function listOrgUserOptions(tenantId: string): Promise<OrgUserPickerDto[]> {
   return prisma.user.findMany({
     where: { tenantId, status: UserStatus.Active },
     select: { id: true, name: true },
     orderBy: { name: 'asc' },
   });
+}
+
+export async function getOrgUserStats(tenantId: string): Promise<OrgUserStats> {
+  const [active, inactive, departments] = await Promise.all([
+    prisma.user.count({ where: { tenantId, status: UserStatus.Active } }),
+    prisma.user.count({ where: { tenantId, status: UserStatus.Inactive } }),
+    prisma.department.count({ where: { tenantId } }),
+  ]);
+  return { active, inactive, departments };
+}
+
+/** Every id must reference a record of the given model within this tenant. */
+async function assertTenantScoped(
+  tenantId: string,
+  ids: string[],
+  model: 'role' | 'department',
+  label: string,
+) {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return unique;
+  const count =
+    model === 'role'
+      ? await prisma.role.count({ where: { tenantId, id: { in: unique } } })
+      : await prisma.department.count({ where: { tenantId, id: { in: unique } } });
+  if (count !== unique.length) {
+    throw new HttpError(400, `One or more selected ${label} do not belong to this enterprise`);
+  }
+  return unique;
+}
+
+export async function createOrgUser(
+  tenantId: string,
+  actorId: string,
+  input: CreateOrgUserRequest,
+): Promise<OrgUserDto> {
+  const existing = await prisma.user.findUnique({ where: { email: input.email } });
+  if (existing) throw new HttpError(409, 'This email is already registered.');
+
+  const roleIds = await assertTenantScoped(tenantId, input.roleIds, 'role', 'roles');
+  const departmentIds = await assertTenantScoped(
+    tenantId,
+    input.departmentIds,
+    'department',
+    'departments',
+  );
+
+  const passwordHash = await argon2.hash(input.password);
+
+  const created = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        tenantId,
+        name: input.name,
+        email: input.email,
+        passwordHash,
+        status: UserStatus.Active,
+        mustChangePassword: true, // admin sets the initial password; forced change on first login (D-30)
+        roles: { create: roleIds.map((roleId) => ({ roleId })) },
+        departments: { create: departmentIds.map((departmentId) => ({ departmentId })) },
+      },
+      include: withRolesAndDepartments,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: user.id,
+        action: 'create',
+        after: { name: user.name, email: user.email, roleIds, departmentIds },
+      },
+    });
+    return user;
+  });
+
+  return toDto(created);
+}
+
+async function findTenantUser(tenantId: string, id: string) {
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user || user.tenantId !== tenantId) throw new HttpError(404, 'User not found');
+  return user;
+}
+
+export async function deactivateOrgUser(
+  tenantId: string,
+  id: string,
+  actorId: string,
+): Promise<OrgUserDto> {
+  const user = await findTenantUser(tenantId, id);
+  if (user.id === actorId) throw new HttpError(400, 'You cannot deactivate your own account');
+  if (user.status === UserStatus.Inactive) throw new HttpError(409, 'User is already deactivated');
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.user.update({
+      where: { id },
+      data: { status: UserStatus.Inactive },
+      include: withRolesAndDepartments,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: id,
+        action: 'deactivate',
+        before: { status: user.status },
+        after: { status: UserStatus.Inactive },
+      },
+    });
+    return u;
+  });
+
+  return toDto(updated);
+}
+
+export async function reactivateOrgUser(
+  tenantId: string,
+  id: string,
+  actorId: string,
+): Promise<OrgUserDto> {
+  const user = await findTenantUser(tenantId, id);
+  if (user.status === UserStatus.Active) throw new HttpError(409, 'User is already active');
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await tx.user.update({
+      where: { id },
+      data: { status: UserStatus.Active },
+      include: withRolesAndDepartments,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'User',
+        entityId: id,
+        action: 'reactivate',
+        before: { status: user.status },
+        after: { status: UserStatus.Active },
+      },
+    });
+    return u;
+  });
+
+  return toDto(updated);
+}
+
+export async function resetOrgUserPassword(
+  tenantId: string,
+  id: string,
+  actorId: string,
+): Promise<AdminResetPasswordResponse> {
+  await findTenantUser(tenantId, id);
+
+  const temporaryPassword = randomBytes(9).toString('base64url');
+  const passwordHash = await argon2.hash(temporaryPassword);
+
+  await prisma.$transaction([
+    prisma.user.update({ where: { id }, data: { passwordHash, mustChangePassword: true } }),
+    prisma.auditLog.create({
+      data: { tenantId, actorId, entity: 'User', entityId: id, action: 'password_reset' },
+    }),
+  ]);
+
+  return { temporaryPassword };
 }
