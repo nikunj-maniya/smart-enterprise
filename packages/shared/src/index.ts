@@ -556,6 +556,7 @@ export type OrgUsersResponse = z.infer<typeof orgUsersResponseSchema>;
 export const orgUserStatsSchema = z.object({
   active: z.number(),
   inactive: z.number(),
+  pending: z.number(),
   departments: z.number(),
 });
 export type OrgUserStats = z.infer<typeof orgUserStatsSchema>;

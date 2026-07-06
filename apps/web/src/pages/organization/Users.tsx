@@ -472,6 +472,7 @@ export default function OrgUsers() {
   const [adding, setAdding] = React.useState(false);
   const [linkModalOpen, setLinkModalOpen] = React.useState(false);
   const [deactivating, setDeactivating] = React.useState<OrgUserDto | null>(null);
+  const [rejecting, setRejecting] = React.useState<OrgUserDto | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [resetResult, setResetResult] = React.useState<{ user: OrgUserDto; password: string } | null>(
@@ -541,6 +542,31 @@ export default function OrgUsers() {
     }
   }
 
+  async function onApprove(u: OrgUserDto) {
+    setBusyId(u.id);
+    try {
+      await apiFetch(`/org-users/${u.id}/approve`, { method: 'POST' });
+      load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onConfirmReject() {
+    if (!rejecting) return;
+    setBusyId(rejecting.id);
+    setActionError(null);
+    try {
+      await apiFetch(`/org-users/${rejecting.id}/reject`, { method: 'POST' });
+      setRejecting(null);
+      load();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Unable to reject the request.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function onResetPassword(u: OrgUserDto) {
     setBusyId(u.id);
     try {
@@ -555,9 +581,10 @@ export default function OrgUsers() {
   }
 
   const STATUS_FILTERS = [
-    { value: '', label: 'All' },
-    { value: userStatus.enum.Active, label: 'Active' },
-    { value: userStatus.enum.Inactive, label: 'Deactivated' },
+    { value: '', label: 'All', badge: 0 },
+    { value: userStatus.enum.Active, label: 'Active', badge: 0 },
+    { value: userStatus.enum.Pending, label: 'Pending', badge: stats?.pending ?? 0 },
+    { value: userStatus.enum.Inactive, label: 'Deactivated', badge: 0 },
   ];
 
   return (
@@ -607,13 +634,22 @@ export default function OrgUsers() {
                 setStatus(f.value);
                 setPage(1);
               }}
-              className={`rounded-lg border px-[13px] py-[7px] text-[12.5px] font-semibold transition-colors ${
+              className={`inline-flex items-center gap-[6px] rounded-lg border px-[13px] py-[7px] text-[12.5px] font-semibold transition-colors ${
                 status === f.value
                   ? 'border-brand bg-brand text-white'
                   : 'border-line-soft bg-surface text-ink-500 hover:bg-surface-muted'
               }`}
             >
               {f.label}
+              {f.badge > 0 && (
+                <span
+                  className={`flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-[5px] text-[11px] font-bold ${
+                    status === f.value ? 'bg-white/25 text-white' : 'bg-warning/15 text-warning'
+                  }`}
+                >
+                  {f.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -677,7 +713,25 @@ export default function OrgUsers() {
               <StatusBadge status={u.status} />
             </span>
             <div className="flex justify-end gap-2">
-              {u.status === userStatus.enum.Active ? (
+              {u.status === userStatus.enum.Pending ? (
+                <>
+                  <Button size="sm" onClick={() => onApprove(u)} disabled={busyId === u.id}>
+                    <Check size={14} />
+                    {busyId === u.id ? 'Approving…' : 'Approve'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setRejecting(u);
+                      setActionError(null);
+                    }}
+                    disabled={busyId === u.id}
+                  >
+                    Reject
+                  </Button>
+                </>
+              ) : u.status === userStatus.enum.Active ? (
                 <>
                   <Button
                     variant="secondary"
@@ -781,6 +835,33 @@ export default function OrgUsers() {
               </Button>
               <Button variant="danger" onClick={onConfirmDeactivate} disabled={busyId === deactivating.id}>
                 {busyId === deactivating.id ? 'Deactivating…' : 'Deactivate'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
+      {rejecting && (
+        <Overlay onClose={() => setRejecting(null)} z={60}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-danger/[0.12] text-danger">
+                <UserX size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Reject request</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Reject <strong>{rejecting.name}</strong>&apos;s request to join? Their self-registration
+              is discarded and the email <strong>{rejecting.email}</strong> is freed to register
+              again.
+            </div>
+            {actionError && <div className="mt-3 text-sm font-medium text-danger">{actionError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setRejecting(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={onConfirmReject} disabled={busyId === rejecting.id}>
+                {busyId === rejecting.id ? 'Rejecting…' : 'Reject request'}
               </Button>
             </div>
           </div>

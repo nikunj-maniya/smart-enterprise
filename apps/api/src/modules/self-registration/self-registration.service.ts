@@ -119,7 +119,8 @@ export async function registerViaToken(
         name: input.name,
         email: input.email,
         passwordHash,
-        status: UserStatus.Active,
+        // Self-registrations await Enterprise Admin approval before they can log in.
+        status: UserStatus.Pending,
         mustChangePassword: false, // self-registrant chose their own password
         roles: { create: [{ roleId: employeeRole.id }] },
       },
@@ -131,7 +132,7 @@ export async function registerViaToken(
         entity: 'User',
         entityId: user.id,
         action: 'self_register',
-        after: { name: user.name, email: user.email },
+        after: { name: user.name, email: user.email, status: UserStatus.Pending },
       },
     });
   });

@@ -25,8 +25,8 @@
 ## 5. Self-Registration Link
 
 - [x] 5.1 Link token API: generate/revoke, per-enterprise expiry (chosen at generation, default 30 min), audited _(Slice 5)_. New `RegistrationLink` model (one active link per tenant; token stored raw so the admin can re-copy the invite URL). Enterprise-Admin guarded. Links are reusable until expiry/revocation.
-- [x] 5.2 Public employee self-registration page (`/join/:token`) for a valid token → active Employee-role user (self-chosen password, no forced change) _(Slice 5)_. Net-new page built in the existing auth-card style (the prototype has no self-registration screen); duplicate email refused.
-- [x] 5.3 Expired/revoked/invalid-link refusal states + link management modal on the Users page ("Share invite link" → generate/copy/regenerate/revoke) _(Slice 5)_. Net-new UI matching the design system (teal shield-check banner, copy-to-clipboard chip).
+- [x] 5.2 Public employee self-registration page (`/join/:token`) for a valid token → **Pending** Employee-role user awaiting Enterprise Admin approval (self-chosen password, no forced change) _(Slice 5; approval-required per user feedback 2026-07-06)_. Net-new page in the existing auth-card style (the prototype has no self-registration screen); duplicate email refused. Per PRD §5A.2 ("optional admin approval per policy"), self-registrants land Pending and cannot log in until approved.
+- [x] 5.3 Expired/revoked/invalid-link refusal states + link management modal on the Users page ("Share invite link" → generate/copy/regenerate/revoke), **plus a pending-approval queue**: the Users page gains a Pending status filter (with a count badge) and Approve/Reject row actions for pending self-registrations (approve → Active; reject → discards the request and frees the email); audited _(Slice 5)_. Net-new UI matching the design system.
 
 ## 6. Projects Master
 

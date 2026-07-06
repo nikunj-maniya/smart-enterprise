@@ -108,10 +108,11 @@ export default function Join() {
           <div className="mx-auto flex h-[68px] w-[68px] items-center justify-center rounded-full bg-[rgb(236,245,246)]">
             <CheckCircle2 size={32} className="text-brand" />
           </div>
-          <div className="mt-[22px] text-2xl font-bold tracking-[-.4px]">You&apos;re all set</div>
+          <div className="mt-[22px] text-2xl font-bold tracking-[-.4px]">Request submitted</div>
           <div className="mt-[10px] text-sm leading-[1.6] text-ink-400">
-            Your account at <strong className="text-ink-700">{info?.tenantName}</strong> is active.
-            Log in with the email and password you just set.
+            Your request to join <strong className="text-ink-700">{info?.tenantName}</strong> has
+            been submitted. An administrator will review it — you&apos;ll be able to log in with the
+            email and password you just set once it&apos;s approved.
           </div>
           <Link to="/login" className="mt-7 block">
             <Button fullWidth>Go to login</Button>
@@ -170,8 +171,8 @@ export default function Join() {
       <div className="mt-[18px] flex items-start gap-[10px] rounded-sm bg-[rgb(236,245,246)] px-[15px] py-[13px]">
         <ShieldCheck size={18} className="mt-[1px] flex-none text-brand" />
         <span className="text-[12.5px] leading-[1.5] text-ink-500">
-          You&apos;ll join as an Employee. Your password is stored hashed and your account is active
-          immediately.
+          You&apos;ll join as an Employee. Your password is stored hashed, and an administrator
+          reviews your request before you can log in.
         </span>
       </div>
     </CardShell>

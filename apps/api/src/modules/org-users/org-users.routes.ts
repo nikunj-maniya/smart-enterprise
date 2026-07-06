@@ -11,4 +11,6 @@ orgUsersRouter.get('/stats', orgUsersController.stats);
 orgUsersRouter.post('/', orgUsersController.create);
 orgUsersRouter.post('/:id/deactivate', orgUsersController.deactivate);
 orgUsersRouter.post('/:id/reactivate', orgUsersController.reactivate);
+orgUsersRouter.post('/:id/approve', orgUsersController.approve);
+orgUsersRouter.post('/:id/reject', orgUsersController.reject);
 orgUsersRouter.post('/:id/reset-password', orgUsersController.resetPassword);
