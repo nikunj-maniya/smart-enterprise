@@ -12,6 +12,7 @@ import { HttpError } from '../../lib/http-error.js';
 function toDto(d: {
   id: string;
   name: string;
+  archived: boolean;
   heads: { user: { id: string; name: string } }[];
   _count: { users: number };
 }): DepartmentDto {
@@ -20,6 +21,7 @@ function toDto(d: {
     name: d.name,
     heads: d.heads.map((h) => ({ id: h.user.id, name: h.user.name })),
     memberCount: d._count.users,
+    archived: d.archived,
   };
 }
 
@@ -32,10 +34,11 @@ export async function listDepartments(
   tenantId: string,
   query: DepartmentsQuery,
 ): Promise<DepartmentsResponse> {
-  const { page, pageSize, search } = query;
+  const { page, pageSize, search, archived } = query;
 
   const where: Prisma.DepartmentWhereInput = {
     tenantId,
+    ...(archived === undefined ? {} : { archived }),
     ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
   };
 
@@ -130,6 +133,39 @@ export async function updateDepartment(
         action: 'update',
         before: { name: existing.name, headUserIds: existing.heads.map((h) => h.userId) },
         after: { name: dept.name, headUserIds: headIds },
+      },
+    });
+    return dept;
+  });
+
+  return toDto(updated);
+}
+
+/** Archives or restores a department. Archived departments are hidden from pickers. */
+export async function setDepartmentArchived(
+  tenantId: string,
+  id: string,
+  actorId: string,
+  archived: boolean,
+): Promise<DepartmentDto> {
+  const existing = await prisma.department.findUnique({ where: { id } });
+  if (!existing || existing.tenantId !== tenantId) throw new HttpError(404, 'Department not found');
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const dept = await tx.department.update({
+      where: { id },
+      data: { archived },
+      include: withHeadsAndCount,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'Department',
+        entityId: id,
+        action: archived ? 'archive' : 'unarchive',
+        before: { archived: existing.archived },
+        after: { archived },
       },
     });
     return dept;

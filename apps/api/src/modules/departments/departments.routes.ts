@@ -9,3 +9,5 @@ departmentsRouter.get('/', departmentsController.list);
 departmentsRouter.post('/', departmentsController.create);
 departmentsRouter.put('/:id', departmentsController.update);
 departmentsRouter.delete('/:id', departmentsController.remove);
+departmentsRouter.post('/:id/archive', departmentsController.archive);
+departmentsRouter.post('/:id/unarchive', departmentsController.archive);

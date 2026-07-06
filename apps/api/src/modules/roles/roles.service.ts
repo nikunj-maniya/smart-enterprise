@@ -15,6 +15,7 @@ function toDto(r: {
   name: string;
   isSystem: boolean;
   permissions: string[];
+  archived: boolean;
   _count: { users: number };
 }): RoleDto {
   return {
@@ -23,17 +24,19 @@ function toDto(r: {
     isSystem: r.isSystem,
     permissions: r.permissions,
     memberCount: r._count.users,
+    archived: r.archived,
   };
 }
 
 const withCount = { _count: { select: { users: true } } } as const;
 
 export async function listRoles(tenantId: string, query: RolesQuery): Promise<RolesResponse> {
-  const { page, pageSize, search, type } = query;
+  const { page, pageSize, search, type, archived } = query;
 
   const where: Prisma.RoleWhereInput = {
     tenantId,
     ...(type ? { isSystem: type === 'system' } : {}),
+    ...(archived === undefined ? {} : { archived }),
     ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
   };
 
@@ -125,6 +128,40 @@ export async function updateRole(
         action: 'update',
         before: { name: existing.name, permissions: existing.permissions },
         after: { name: role.name, permissions: role.permissions },
+      },
+    });
+    return role;
+  });
+
+  return toDto(updated);
+}
+
+/** Archives or restores a custom role. System roles can't be archived. */
+export async function setRoleArchived(
+  tenantId: string,
+  id: string,
+  actorId: string,
+  archived: boolean,
+): Promise<RoleDto> {
+  const existing = await prisma.role.findUnique({ where: { id } });
+  if (!existing || existing.tenantId !== tenantId) throw new HttpError(404, 'Role not found');
+  if (existing.isSystem) throw new HttpError(409, 'System roles cannot be archived');
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const role = await tx.role.update({
+      where: { id },
+      data: { archived },
+      include: withCount,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'Role',
+        entityId: id,
+        action: archived ? 'archive' : 'unarchive',
+        before: { archived: existing.archived },
+        after: { archived },
       },
     });
     return role;

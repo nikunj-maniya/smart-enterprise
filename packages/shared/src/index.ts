@@ -428,6 +428,12 @@ export const updatePlatformSettingsSchema = z.object({
   notifyOnNewRegistration: z.boolean().optional(),
 });
 
+/** Query-string boolean: 'true'→true, 'false'→false, absent→undefined (avoids z.coerce pitfalls). */
+const queryBoolean = z.preprocess(
+  (v) => (v === 'true' ? true : v === 'false' ? false : undefined),
+  z.boolean().optional(),
+);
+
 // ── Departments master (org-masters) ───────────────────────────
 export const departmentHeadSchema = z.object({ id: z.string(), name: z.string() });
 export type DepartmentHeadDto = z.infer<typeof departmentHeadSchema>;
@@ -437,6 +443,7 @@ export const departmentSchema = z.object({
   name: z.string(),
   heads: z.array(departmentHeadSchema),
   memberCount: z.number(),
+  archived: z.boolean(),
 });
 export type DepartmentDto = z.infer<typeof departmentSchema>;
 
@@ -444,6 +451,8 @@ export const departmentsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().optional(),
+  // Pickers pass archived=false to hide retired departments; the master list omits it (shows all).
+  archived: queryBoolean,
 });
 export type DepartmentsQuery = z.infer<typeof departmentsQuerySchema>;
 
@@ -485,6 +494,7 @@ export const roleSchema = z.object({
   isSystem: z.boolean(),
   permissions: z.array(z.string()),
   memberCount: z.number(),
+  archived: z.boolean(),
 });
 export type RoleDto = z.infer<typeof roleSchema>;
 
@@ -493,6 +503,7 @@ export const rolesQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().optional(),
   type: z.enum(['system', 'custom']).optional(),
+  archived: queryBoolean,
 });
 export type RolesQuery = z.infer<typeof rolesQuerySchema>;
 

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Search, Building, PencilLine, Plus, Check, Trash2 } from 'lucide-react';
+import { Search, Building, PencilLine, Plus, Check, Trash2, Archive, ArchiveRestore } from 'lucide-react';
 import type {
   CreateDepartmentRequest,
   DepartmentDto,
@@ -16,25 +16,48 @@ function DepartmentCard({
   dept,
   onEdit,
   onDelete,
+  onToggleArchive,
 }: {
   dept: DepartmentDto;
   onEdit: () => void;
   onDelete: () => void;
+  onToggleArchive: () => void;
 }) {
   const headNames = dept.heads.map((h) => h.name).join(', ');
   return (
-    <div className="rounded-[14px] border border-line-soft bg-surface p-5 shadow-card">
+    <div
+      className={`rounded-[14px] border border-line-soft bg-surface p-5 shadow-card ${
+        dept.archived ? 'opacity-70' : ''
+      }`}
+    >
       <div className="flex items-center gap-3">
         <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[11px] bg-[rgb(236,245,246)]">
           <Building size={20} className="text-brand" />
         </div>
-        <div className="min-w-0 flex-1 truncate text-[16px] font-bold text-ink-900">{dept.name}</div>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="truncate text-[16px] font-bold text-ink-900">{dept.name}</span>
+          {dept.archived && (
+            <span className="flex-none rounded-full bg-surface-muted px-[8px] py-[2px] text-[11px] font-semibold text-ink-400">
+              Archived
+            </span>
+          )}
+        </div>
+        {!dept.archived && (
+          <button
+            className="flex flex-none rounded-[7px] p-[6px] text-ink-400 hover:bg-surface-muted"
+            onClick={onEdit}
+            aria-label={`Edit ${dept.name}`}
+          >
+            <PencilLine size={16} />
+          </button>
+        )}
         <button
           className="flex flex-none rounded-[7px] p-[6px] text-ink-400 hover:bg-surface-muted"
-          onClick={onEdit}
-          aria-label={`Edit ${dept.name}`}
+          onClick={onToggleArchive}
+          aria-label={`${dept.archived ? 'Unarchive' : 'Archive'} ${dept.name}`}
+          title={dept.archived ? 'Unarchive' : 'Archive'}
         >
-          <PencilLine size={16} />
+          {dept.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
         </button>
         <button
           className="flex flex-none rounded-[7px] p-[6px] text-ink-400 hover:bg-danger/10 hover:text-danger"
@@ -238,6 +261,12 @@ export default function Departments() {
     load();
   }
 
+  async function onToggleArchive(dept: DepartmentDto) {
+    const action = dept.archived ? 'unarchive' : 'archive';
+    await apiFetch(`/departments/${dept.id}/${action}`, { method: 'POST' });
+    load();
+  }
+
   async function onConfirmDelete() {
     if (!deleting) return;
     setDeleteBusy(true);
@@ -298,6 +327,7 @@ export default function Departments() {
                 setDeleting(dept);
                 setDeleteError(null);
               }}
+              onToggleArchive={() => onToggleArchive(dept)}
             />
           ))}
         </div>
