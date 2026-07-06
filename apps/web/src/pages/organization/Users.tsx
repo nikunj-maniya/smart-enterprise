@@ -11,6 +11,9 @@ import {
   Check,
   KeyRound,
   Copy,
+  Link2,
+  RefreshCw,
+  ShieldCheck,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -21,6 +24,7 @@ import {
   type OrgUserDto,
   type OrgUsersResponse,
   type OrgUserStats,
+  type RegistrationLinkDto,
   type RolesResponse,
 } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
@@ -302,6 +306,155 @@ function AddUserModal({
   );
 }
 
+const EXPIRY_OPTIONS = [
+  { minutes: 30, label: '30 minutes' },
+  { minutes: 120, label: '2 hours' },
+  { minutes: 1440, label: '24 hours' },
+  { minutes: 10080, label: '7 days' },
+];
+
+function InviteLinkModal({ onClose }: { onClose: () => void }) {
+  const [link, setLink] = React.useState<RegistrationLinkDto | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [expiryMinutes, setExpiryMinutes] = React.useState(30);
+  const [busy, setBusy] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    apiFetch<RegistrationLinkDto | null>('/self-registration')
+      .then(setLink)
+      .catch(() => setLink(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const active = link && !link.expired;
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiFetch<RegistrationLinkDto>('/self-registration', {
+        method: 'POST',
+        body: JSON.stringify({ expiryMinutes }),
+      });
+      setLink(res);
+      setCopied(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to generate the link.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch('/self-registration', { method: 'DELETE' });
+      setLink(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to revoke the link.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!link) return;
+    await navigator.clipboard.writeText(link.url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <Overlay onClose={onClose} z={60}>
+      <div className="mx-auto w-full max-w-[480px] rounded-2xl bg-surface p-[26px] shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-[rgb(236,245,246)] text-brand">
+            <Link2 size={20} />
+          </div>
+          <div>
+            <div className="text-lg font-bold text-ink-900">Self-registration link</div>
+            <div className="text-[12.5px] text-ink-400">
+              Anyone with the link joins as an Employee until it expires.
+            </div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-sm text-ink-400">Loading…</div>
+        ) : active ? (
+          <div className="mt-5">
+            <span className="text-sm font-semibold text-ink-900">Shareable link</span>
+            <div className="mt-2 flex items-center gap-2 rounded-sm border border-line bg-app-bg px-3 py-[10px]">
+              <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink-700">
+                {link.url}
+              </span>
+              <Button variant="secondary" size="sm" onClick={copy}>
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <div className="mt-3 flex items-start gap-[10px] rounded-sm bg-[rgb(236,245,246)] px-[15px] py-[11px]">
+              <ShieldCheck size={16} className="mt-[1px] flex-none text-brand" />
+              <span className="text-[12.5px] leading-[1.5] text-ink-500">
+                Expires {new Date(link.expiresAt).toLocaleString()}. Revoke it anytime, or
+                regenerate to replace it.
+              </span>
+            </div>
+            {error && <div className="mt-3 text-sm font-medium text-danger">{error}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="danger" onClick={revoke} disabled={busy}>
+                {busy ? 'Working…' : 'Revoke'}
+              </Button>
+              <Button variant="secondary" onClick={generate} disabled={busy}>
+                <RefreshCw size={15} />
+                Regenerate
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5">
+            {link && link.expired && (
+              <div className="mb-4 rounded-sm bg-[rgba(247,107,21,.1)] px-[15px] py-[11px] text-[12.5px] leading-[1.5] text-warning">
+                The previous link has expired. Generate a new one to invite employees.
+              </div>
+            )}
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-ink-900">Link expires after</span>
+              <div className="relative flex items-center">
+                <select
+                  value={expiryMinutes}
+                  onChange={(e) => setExpiryMinutes(Number(e.target.value))}
+                  className="h-11 w-full appearance-none rounded-sm border border-line bg-surface py-0 pl-3 pr-9 text-sm text-ink-900 outline-none"
+                >
+                  {EXPIRY_OPTIONS.map((o) => (
+                    <option key={o.minutes} value={o.minutes}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={18} className="pointer-events-none absolute right-3 text-ink-400" />
+              </div>
+            </label>
+            {error && <div className="mt-3 text-sm font-medium text-danger">{error}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button onClick={generate} disabled={busy}>
+                <Link2 size={16} />
+                {busy ? 'Generating…' : 'Generate link'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Overlay>
+  );
+}
+
 export default function OrgUsers() {
   const { user } = useAuth();
   const [rows, setRows] = React.useState<OrgUserDto[]>([]);
@@ -317,6 +470,7 @@ export default function OrgUsers() {
   const [roles, setRoles] = React.useState<{ id: string; name: string }[]>([]);
   const [departments, setDepartments] = React.useState<{ id: string; name: string }[]>([]);
   const [adding, setAdding] = React.useState(false);
+  const [linkModalOpen, setLinkModalOpen] = React.useState(false);
   const [deactivating, setDeactivating] = React.useState<OrgUserDto | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
@@ -414,10 +568,16 @@ export default function OrgUsers() {
           subtitle="Invite people, assign departments and roles, and deactivate access. Accounts activate without an email step."
           breadcrumb={`Organization · ${user?.tenantName ?? ''}`}
         />
-        <Button size="lg" onClick={() => setAdding(true)}>
-          <UserPlus size={18} />
-          Add User
-        </Button>
+        <div className="flex gap-3">
+          <Button variant="secondary" size="lg" onClick={() => setLinkModalOpen(true)}>
+            <Link2 size={18} />
+            Share invite link
+          </Button>
+          <Button size="lg" onClick={() => setAdding(true)}>
+            <UserPlus size={18} />
+            Add User
+          </Button>
+        </div>
       </div>
 
       <div className="mt-[22px] grid max-w-[640px] grid-cols-3 gap-[18px]">
@@ -598,6 +758,8 @@ export default function OrgUsers() {
           }}
         />
       )}
+
+      {linkModalOpen && <InviteLinkModal onClose={() => setLinkModalOpen(false)} />}
 
       {deactivating && (
         <Overlay onClose={() => setDeactivating(null)} z={60}>

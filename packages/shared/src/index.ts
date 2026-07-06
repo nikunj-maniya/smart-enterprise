@@ -568,3 +568,31 @@ export const createOrgUserRequestSchema = z.object({
   departmentIds: z.array(z.string()).default([]),
 });
 export type CreateOrgUserRequest = z.infer<typeof createOrgUserRequestSchema>;
+
+// ── Self-registration link (org-masters, tenant-scoped) ────────
+/** Admin view of the current self-registration link. */
+export const registrationLinkSchema = z.object({
+  url: z.string(),
+  expiresAt: z.string(),
+  expired: z.boolean(),
+});
+export type RegistrationLinkDto = z.infer<typeof registrationLinkSchema>;
+
+export const generateRegistrationLinkRequestSchema = z.object({
+  // Per-enterprise expiry window; default 30 minutes (PRD §5A.2, design.md).
+  expiryMinutes: z.coerce.number().int().min(5).max(10080).default(30),
+});
+export type GenerateRegistrationLinkRequest = z.infer<typeof generateRegistrationLinkRequestSchema>;
+
+/** Public info shown on the self-registration page for a valid token. */
+export const selfRegistrationInfoSchema = z.object({
+  tenantName: z.string(),
+});
+export type SelfRegistrationInfo = z.infer<typeof selfRegistrationInfoSchema>;
+
+export const selfRegisterRequestSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  email: z.string().email(),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+export type SelfRegisterRequest = z.infer<typeof selfRegisterRequestSchema>;

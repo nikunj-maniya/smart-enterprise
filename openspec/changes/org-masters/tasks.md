@@ -24,9 +24,9 @@
 
 ## 5. Self-Registration Link
 
-- [ ] 5.1 Link token API: generate/revoke, per-enterprise expiry setting (default 30 min) _(Slice 5)_
-- [ ] 5.2 Public employee self-registration page for a valid token → active Employee-role user _(Slice 5)_
-- [ ] 5.3 Expired/revoked-link refusal states + link management UI on the Users page _(Slice 5)_
+- [x] 5.1 Link token API: generate/revoke, per-enterprise expiry (chosen at generation, default 30 min), audited _(Slice 5)_. New `RegistrationLink` model (one active link per tenant; token stored raw so the admin can re-copy the invite URL). Enterprise-Admin guarded. Links are reusable until expiry/revocation.
+- [x] 5.2 Public employee self-registration page (`/join/:token`) for a valid token → active Employee-role user (self-chosen password, no forced change) _(Slice 5)_. Net-new page built in the existing auth-card style (the prototype has no self-registration screen); duplicate email refused.
+- [x] 5.3 Expired/revoked/invalid-link refusal states + link management modal on the Users page ("Share invite link" → generate/copy/regenerate/revoke) _(Slice 5)_. Net-new UI matching the design system (teal shield-check banner, copy-to-clipboard chip).
 
 ## 6. Projects Master
 

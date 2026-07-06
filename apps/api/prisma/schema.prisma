@@ -61,6 +61,21 @@ model Tenant {
   notifications Notification[]
   auditLogs   AuditLog[]
   registration EnterpriseRegistration?
+  registrationLink RegistrationLink?
+}
+
+// Shareable employee self-registration link — at most one active link per tenant.
+// Token is stored raw (not hashed) so the admin can re-display/copy the URL; it only
+// grants Employee-level self-registration into this tenant and is expiring + revocable.
+model RegistrationLink {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  token     String   @unique
+  expiresAt DateTime
+  createdBy String
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 }
 
 model EnterpriseRegistration {
