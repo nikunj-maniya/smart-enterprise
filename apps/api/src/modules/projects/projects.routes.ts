@@ -8,3 +8,4 @@ projectsRouter.use(requireAuth, requireEnterpriseAdmin);
 projectsRouter.get('/', projectsController.list);
 projectsRouter.post('/', projectsController.create);
 projectsRouter.put('/:id', projectsController.update);
+projectsRouter.delete('/:id', projectsController.remove);

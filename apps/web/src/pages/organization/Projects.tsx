@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Search, ChevronDown, Plus, PencilLine, Check } from 'lucide-react';
+import { Search, ChevronDown, Plus, PencilLine, Check, Trash2 } from 'lucide-react';
 import {
   SystemRoleKey,
   type CreateProjectRequest,
@@ -300,6 +300,9 @@ export default function Projects() {
   const [editing, setEditing] = React.useState<ProjectDto | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [statusBusyId, setStatusBusyId] = React.useState<string | null>(null);
+  const [deleting, setDeleting] = React.useState<ProjectDto | null>(null);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
 
   React.useEffect(() => {
     // Members can be anyone; PM/Tech Lead are limited to holders of the matching system role.
@@ -343,6 +346,21 @@ export default function Projects() {
     setEditing(null);
     setCreating(false);
     load();
+  }
+
+  async function onConfirmDelete() {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await apiFetch(`/projects/${deleting.id}`, { method: 'DELETE' });
+      setDeleting(null);
+      load();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Unable to delete the project.');
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   // Inline status change from the table — reuses the update endpoint, keeping assignments intact.
@@ -442,10 +460,21 @@ export default function Projects() {
                 onChange={(next) => onChangeStatus(p, next)}
               />
             </span>
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => setEditing(p)}>
                 <PencilLine size={14} />
                 Edit
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setDeleting(p);
+                  setDeleteError(null);
+                }}
+                aria-label={`Delete ${p.name}`}
+              >
+                <Trash2 size={14} className="text-danger" />
               </Button>
             </div>
           </div>
@@ -496,6 +525,33 @@ export default function Projects() {
           }}
           onSaved={onSaved}
         />
+      )}
+
+      {deleting && (
+        <Overlay onClose={() => setDeleting(null)} z={60}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-danger/[0.12] text-danger">
+                <Trash2 size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Delete project</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Delete <strong>{deleting.name}</strong>? This can&apos;t be undone. A project that
+              still has an assigned PM, Tech Lead, or members can&apos;t be deleted — clear them
+              first, or archive it instead.
+            </div>
+            {deleteError && <div className="mt-3 text-sm font-medium text-danger">{deleteError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setDeleting(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={onConfirmDelete} disabled={deleteBusy}>
+                {deleteBusy ? 'Deleting…' : 'Delete project'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
       )}
     </>
   );

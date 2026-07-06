@@ -35,3 +35,12 @@ export async function update(req: Request, res: Response, next: NextFunction) {
     next(err);
   }
 }
+
+export async function remove(req: Request, res: Response, next: NextFunction) {
+  try {
+    await departmentsService.deleteDepartment(req.user!.tenantId!, req.params.id, req.user!.id);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+}

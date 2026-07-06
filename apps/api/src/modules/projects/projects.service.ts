@@ -151,3 +151,40 @@ export async function updateProject(
 
   return toDto(updated);
 }
+
+/**
+ * Deletes a project. Blocked (§5A.1 referential integrity) while people are assigned
+ * (PM/Tech Lead/members) or requests reference it — clear those first.
+ */
+export async function deleteProject(tenantId: string, id: string, actorId: string): Promise<void> {
+  const existing = await prisma.project.findUnique({ where: { id } });
+  if (!existing || existing.tenantId !== tenantId) throw new HttpError(404, 'Project not found');
+
+  const [memberCount, requestCount] = await Promise.all([
+    prisma.projectMember.count({ where: { projectId: id } }),
+    prisma.request.count({ where: { projectId: id } }),
+  ]);
+  if (memberCount > 0) {
+    throw new HttpError(
+      409,
+      'This project has assigned people (PM, Tech Lead, or members). Clear them before deleting it.',
+    );
+  }
+  if (requestCount > 0) {
+    throw new HttpError(409, 'Requests reference this project, so it can’t be deleted.');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.project.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'Project',
+        entityId: id,
+        action: 'delete',
+        before: { name: existing.name, status: existing.status },
+      },
+    });
+  });
+}

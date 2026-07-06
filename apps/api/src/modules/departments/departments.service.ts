@@ -137,3 +137,45 @@ export async function updateDepartment(
 
   return toDto(updated);
 }
+
+/**
+ * Deletes a department. Blocked (§5A.1 referential integrity) while users are assigned to it
+ * or requests reference it — reassign those first. The department's own head rows are cleared.
+ */
+export async function deleteDepartment(
+  tenantId: string,
+  id: string,
+  actorId: string,
+): Promise<void> {
+  const existing = await prisma.department.findUnique({ where: { id } });
+  if (!existing || existing.tenantId !== tenantId) throw new HttpError(404, 'Department not found');
+
+  const [memberCount, requestCount] = await Promise.all([
+    prisma.userDepartment.count({ where: { departmentId: id } }),
+    prisma.request.count({ where: { departmentId: id } }),
+  ]);
+  if (memberCount > 0) {
+    throw new HttpError(
+      409,
+      `${memberCount} user${memberCount === 1 ? ' is' : 's are'} assigned to this department. Reassign them before deleting it.`,
+    );
+  }
+  if (requestCount > 0) {
+    throw new HttpError(409, 'Requests reference this department, so it can’t be deleted.');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.departmentHead.deleteMany({ where: { departmentId: id } });
+    await tx.department.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'Department',
+        entityId: id,
+        action: 'delete',
+        before: { name: existing.name },
+      },
+    });
+  });
+}
