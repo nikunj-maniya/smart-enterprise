@@ -13,6 +13,7 @@ import { settingsRouter } from './modules/settings/settings.routes.js';
 import { departmentsRouter } from './modules/departments/departments.routes.js';
 import { rolesRouter } from './modules/roles/roles.routes.js';
 import { orgUsersRouter } from './modules/org-users/org-users.routes.js';
+import { projectsRouter } from './modules/projects/projects.routes.js';
 import {
   selfRegistrationRouter,
   publicSelfRegistrationRouter,
@@ -43,6 +44,7 @@ app.use('/settings', settingsRouter);
 app.use('/departments', departmentsRouter);
 app.use('/roles', rolesRouter);
 app.use('/org-users', orgUsersRouter);
+app.use('/projects', projectsRouter);
 app.use('/self-registration', selfRegistrationRouter);
 app.use('/public/self-registration', publicSelfRegistrationRouter);
 

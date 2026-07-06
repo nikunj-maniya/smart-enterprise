@@ -30,9 +30,9 @@
 
 ## 6. Projects Master
 
-- [ ] 6.1 Tenant-scoped Project CRUD API with PM/Tech Lead/member assignment (audited) _(Slice 6)_
-- [ ] 6.2 Projects page: table (Project, PM, Tech Lead, Members, Status, Edit), search, filters, pagination _(Slice 6)_
-- [ ] 6.3 Project create/edit modal (name, status, PM, Tech Lead, members) _(Slice 6)_
+- [x] 6.1 Tenant-scoped Project create/list/update API with PM/Tech Lead/member assignment, audited _(Slice 6)_. Adds `Project.status` (active/archived); reuses `ProjectMember.roleInProject` (PM/TL/member). A user holds one slot per project (PK), so PM≠TL is enforced and members exclude whoever is PM/TL. Delete deferred to Slice 7 — consistent with Departments/Roles (prototype is Edit-only).
+- [x] 6.2 Projects page: table (Project, Project Manager, Tech Lead, Members, Status badge, Edit), search, All/Active/Archived filter chips, pagination — match the design _(Slice 6)_.
+- [x] 6.3 Project create/edit modal (name, status, single-select PM, single-select Tech Lead, **multi-select members**) _(Slice 6)_. Members is a real user multi-select (the count in the table is the real `ProjectMember` count) rather than the prototype mock's free-typed number — the mock predates the real assignment model, and the spec requires real members that "drive approver resolution."
 
 ## 7. Referential Integrity
 
