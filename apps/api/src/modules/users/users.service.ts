@@ -33,7 +33,7 @@ export async function listPlatformUsers(
   const [rows, total] = await Promise.all([
     prisma.user.findMany({
       where,
-      include: { tenant: true },
+      include: { tenant: true, roles: { include: { role: { select: { name: true } } } } },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -42,18 +42,19 @@ export async function listPlatformUsers(
   ]);
 
   return {
-    rows: rows.map(
-      (u): PlatformUserDto => ({
+    rows: rows.map((u): PlatformUserDto => {
+      const roleNames = u.roles.map((ur) => ur.role.name).sort();
+      return {
         id: u.id,
         name: u.name,
         email: u.email,
-        role: u.isSystemAdmin ? 'System Admin' : 'Enterprise Admin',
+        role: u.isSystemAdmin ? 'System Admin' : roleNames.length ? roleNames.join(', ') : 'No role',
         // tenant is guaranteed non-null by the tenantId-not-null filter above.
         enterpriseName: u.tenant!.name,
         status: u.status as PlatformUserDto['status'],
         createdAt: u.createdAt.toISOString(),
-      }),
-    ),
+      };
+    }),
     total,
     page,
     pageSize,

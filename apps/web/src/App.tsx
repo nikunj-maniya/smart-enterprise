@@ -21,6 +21,7 @@ import OrgUsers from '@/pages/organization/Users';
 import Departments from '@/pages/organization/Departments';
 import Roles from '@/pages/organization/Roles';
 import Projects from '@/pages/organization/Projects';
+import CompanyDetails from '@/pages/organization/CompanyDetails';
 import { useAuth } from '@/lib/auth';
 
 /** Landing routes each persona to their home. Employee request screens land in a later change. */
@@ -114,6 +115,14 @@ export default function App() {
           element={
             <RequireRole role={SystemRoleKey.EnterpriseAdmin}>
               <Projects />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/organization/details"
+          element={
+            <RequireRole role={SystemRoleKey.EnterpriseAdmin}>
+              <CompanyDetails />
             </RequireRole>
           }
         />

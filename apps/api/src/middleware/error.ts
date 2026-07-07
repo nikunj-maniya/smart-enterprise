@@ -8,7 +8,9 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return res.status(400).json({ error: 'Validation failed', details: err.flatten() });
   }
   if (err instanceof HttpError) {
-    return res.status(err.status).json({ error: err.message });
+    return res
+      .status(err.status)
+      .json({ error: err.message, ...(err.details !== undefined ? { details: err.details } : {}) });
   }
   // eslint-disable-next-line no-console
   console.error(err);

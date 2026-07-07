@@ -208,6 +208,19 @@ export interface LoginResponse extends AuthTokens {
 }
 
 // ── Enterprise registration ──────────────────────────────────
+/** Canonical dropdown options — shared by the Registration form and the Enterprise Admin's Company Details form so the two can never drift apart. */
+export const INDUSTRY_OPTIONS = [
+  'Technology',
+  'Finance & Banking',
+  'Healthcare',
+  'Retail & E-commerce',
+  'Manufacturing',
+  'Education',
+  'Government',
+  'Other',
+] as const;
+export const COMPANY_SIZE_OPTIONS = ['<20', '20–50', '50–120', '120–500', '500–2000', '2000+'] as const;
+
 export const registrationStatus = z.enum(['Pending', 'Accepted', 'Rejected']);
 export type RegistrationStatus = z.infer<typeof registrationStatus>;
 export const RegistrationStatus = {
@@ -742,6 +755,40 @@ export type PublishFormRequest = z.infer<typeof publishFormRequestSchema>;
 export interface PublishDefinitionInput extends PublishFormRequest {
   key: string;
 }
+
+// ── Request submission (form-engine, tenant-scoped) — PRD §6/§9 ────
+export const createRequestSchema = z.object({
+  formKey: z.string().min(1),
+  payload: z.record(z.string(), z.unknown()),
+});
+export type CreateRequestInput = z.infer<typeof createRequestSchema>;
+
+export const requestDtoSchema = z.object({
+  id: z.string(),
+  formKey: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+});
+export type RequestDto = z.infer<typeof requestDtoSchema>;
+
+// ── Enterprise details (self-service, Enterprise Admin only) ───
+/** Company-level info — editable only by the tenant's own Enterprise Admin, never by System Admin. */
+export const enterpriseDetailsSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  industry: z.string().nullable(),
+  size: z.string().nullable(),
+  website: z.string().nullable(),
+});
+export type EnterpriseDetailsDto = z.infer<typeof enterpriseDetailsSchema>;
+
+export const updateEnterpriseDetailsRequestSchema = z.object({
+  name: z.string().min(1, 'Company name is required'),
+  industry: z.string().nullable().optional(),
+  size: z.string().nullable().optional(),
+  website: z.string().nullable().optional(),
+});
+export type UpdateEnterpriseDetailsRequest = z.infer<typeof updateEnterpriseDetailsRequestSchema>;
 
 // ── Profile (self-service, any authenticated user) ─────────────
 export const profileSchema = z.object({
