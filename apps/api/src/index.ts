@@ -23,6 +23,7 @@ import {
   publicSelfRegistrationRouter,
 } from './modules/self-registration/self-registration.routes.js';
 import { errorHandler } from './middleware/error.js';
+import { scheduleAutoCompleteRequestsJob } from './jobs/auto-complete-requests.job.js';
 
 const app = express();
 app.use(cors());
@@ -62,4 +63,9 @@ const port = Number(process.env.API_PORT ?? 4000);
 app.listen(port, () => {
   // eslint-disable-next-line no-console
   console.log(`API listening on http://localhost:${port}`);
+});
+
+scheduleAutoCompleteRequestsJob().catch((err) => {
+  // eslint-disable-next-line no-console
+  console.error('Failed to schedule auto-complete-requests job', err);
 });

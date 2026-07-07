@@ -771,6 +771,13 @@ export const requestDtoSchema = z.object({
 });
 export type RequestDto = z.infer<typeof requestDtoSchema>;
 
+/** Body for a status transition — moves a request along a transition declared in its form's status model. */
+export const transitionRequestSchema = z.object({
+  toState: z.string().min(1),
+  note: z.string().optional(),
+});
+export type TransitionRequestInput = z.infer<typeof transitionRequestSchema>;
+
 // ── Enterprise details (self-service, Enterprise Admin only) ───
 /** Company-level info — editable only by the tenant's own Enterprise Admin, never by System Admin. */
 export const enterpriseDetailsSchema = z.object({
