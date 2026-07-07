@@ -8,7 +8,7 @@
 
 - [x] 2.1 `GET /forms` + `GET /forms/:key` returning the tenant's latest published definition (sections, fields, workflow, status model) _(Slice 2)_ — `modules/forms/`; both `requireAuth`, tenant-scoped; sections ordered; 404 when no published version
 - [x] 2.2 Publish flow: clone definition to an immutable `version + 1` row-set; reject unsupported field types at save _(Slice 2)_ — `POST /forms/:key/publish` (Enterprise Admin); reusable `publishDefinition()` for Slice 3 seed; `parseDefinition` → 400 naming the field; v1 stays readable after v2 published. NOTE: add a `FormField.order` column in Slice 3 (seeding) — field order currently relies on insertion order
-- [ ] 2.3 Seed the four core forms (Leave, WFH, Visitor, IT per PRD §7) on tenant activation + backfill script for active tenants _(Slice 3)_
+- [x] 2.3 Seed the four core forms (Leave, WFH, Visitor, IT per PRD §7) on tenant activation + backfill script for active tenants _(Slice 3)_ — `core-forms.ts` (4 defs per §7/§8/§9, all pass `parseDefinition`) + `seedTenantCoreForms()` hooked into `acceptRegistration` tx (idempotent per key) + `backfill-core-forms.ts`. Added `FormField.order` column (migration `20260707050311_form_field_order`), wired through publish (order=index) + read; `publishDefinition` now tx-aware. Verified: activation seeds 4 published v1 forms, ordered fields, backfill no dupes. NOTE: PM picker filters `project-manager` only (no `ba` system role — see report)
 
 ## 3. Request Submission
 

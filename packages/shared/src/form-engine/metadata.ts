@@ -46,6 +46,8 @@ export const pickerConfigSchema = z.object({
   multi: z.boolean().optional(),
   roles: z.array(z.string()).optional(),
   departments: z.array(z.string()).optional(),
+  /** Non-role option source the picker/engine resolves specially (e.g. project-specific Tech Leads). */
+  source: z.string().optional(),
 });
 export type PickerConfig = z.infer<typeof pickerConfigSchema>;
 
