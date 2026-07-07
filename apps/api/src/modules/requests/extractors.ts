@@ -1,3 +1,5 @@
+import type { Prisma } from '@prisma/client';
+
 // ── Promoted-column extractor map (design.md: "Promoted columns extracted
 // server-side, never client-supplied") ─────────────────────────────────────
 // Derives the typed `Request` columns used for cross-cutting queries (absence
@@ -65,4 +67,35 @@ const EXTRACTORS: Record<string, (data: Record<string, unknown>) => PromotedColu
 
 export function extractPromotedColumns(formKey: string, data: Record<string, unknown>): PromotedColumns {
   return EXTRACTORS[formKey]?.(data) ?? {};
+}
+
+// ── Balance-restore hook (design.md: "this change only exposes the restore
+// hook" — the leave-balance ledger itself lands in `leave-wfh-requests`) ────
+// Only forms with day-based promoted columns (Leave, WFH) carry a balance to
+// restore; Visitor/IT cancellations never call this.
+
+export function requiresBalanceRestore(formKey: string): boolean {
+  return formKey in EXTRACTORS;
+}
+
+/** Identifying/promoted fields a future balance ledger needs to credit back a cancelled request. */
+export interface BalanceRestoreContext {
+  tenantId: string;
+  requestId: string;
+  formKey: string;
+  leaveTypeId: string | null;
+  totalDays: number | null;
+  halfDayCount: number | null;
+}
+
+/**
+ * Fired inside the same transition transaction whenever an authorized HR/Enterprise
+ * Admin cancels an Approved Leave/WFH request. No-op stub for now — `leave-wfh-requests`
+ * implements the actual balance credit against this hook.
+ */
+export async function restoreBalanceOnCancel(
+  _tx: Prisma.TransactionClient,
+  _context: BalanceRestoreContext,
+): Promise<void> {
+  // Intentionally empty — see doc comment above.
 }
