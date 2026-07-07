@@ -10,12 +10,15 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "tsx --test src/form-engine/fixtures.test.ts"
   },
   "dependencies": {
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }

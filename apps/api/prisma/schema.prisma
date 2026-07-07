@@ -290,6 +290,7 @@ model FormField {
   key            String
   label          String
   type           String
+  order          Int     @default(0)
   required       Boolean @default(false)
   options        Json?
   validation     Json?
