@@ -13,7 +13,7 @@ export async function listEnterprises(query: EnterprisesQuery): Promise<Enterpri
       ? {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
-            { registration: { industry: { contains: search, mode: 'insensitive' } } },
+            { industry: { contains: search, mode: 'insensitive' } },
           ],
         }
       : {}),
@@ -22,7 +22,7 @@ export async function listEnterprises(query: EnterprisesQuery): Promise<Enterpri
   const [tenants, total] = await Promise.all([
     prisma.tenant.findMany({
       where,
-      include: { registration: true, _count: { select: { users: true } } },
+      include: { _count: { select: { users: true } } },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -34,7 +34,7 @@ export async function listEnterprises(query: EnterprisesQuery): Promise<Enterpri
     rows: tenants.map((t) => ({
       id: t.id,
       name: t.name,
-      industry: t.registration?.industry ?? null,
+      industry: t.industry,
       users: t._count.users,
       since: t.createdAt.toISOString(),
       status: t.status as EnterpriseDto['status'],

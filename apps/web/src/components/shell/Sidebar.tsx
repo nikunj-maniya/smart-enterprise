@@ -30,6 +30,7 @@ const organizationNav: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/organization/departments', label: 'Departments', icon: Building },
   { to: '/organization/roles', label: 'Roles', icon: Shield },
   { to: '/organization/projects', label: 'Projects', icon: FolderKanban },
+  { to: '/organization/details', label: 'Company Details', icon: Building2 },
 ];
 
 function SidebarLink({

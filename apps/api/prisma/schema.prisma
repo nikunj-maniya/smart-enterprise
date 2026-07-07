@@ -46,6 +46,9 @@ enum FormStatus {
 model Tenant {
   id        String       @id @default(cuid())
   name      String
+  industry  String?
+  size      String?
+  website   String?
   branding  Json?
   settings  Json?
   status    TenantStatus @default(Pending)

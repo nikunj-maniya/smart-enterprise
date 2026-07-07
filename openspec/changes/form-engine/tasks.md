@@ -12,9 +12,9 @@
 
 ## 3. Request Submission
 
-- [ ] 3.1 `POST /requests` validating payload against the pinned version via the compiled Zod schema _(Slice 4)_
-- [ ] 3.2 Server-side extractor map deriving promoted typed columns from the validated payload _(Slice 4)_
-- [ ] 3.3 Write the initial status + first `RequestStatusHistory` row + audit log entry on create _(Slice 4)_
+- [x] 3.1 `POST /requests` validating payload against the pinned version via the compiled Zod schema _(Slice 4)_ — `modules/requests/`; `forms.service.getPublishedDefinitionForSubmission()` converts the Prisma row (not the DTO — its `null` options/validation/visibilityRule fail the shared `.optional()` schemas) straight into the shared engine's `FormDefinition`, then `validatePayload()` re-validates authoritatively; 404 on no published version, 400 with per-field `details` on validation failure (`HttpError` extended with an optional `details` payload, surfaced by the error middleware)
+- [x] 3.2 Server-side extractor map deriving promoted typed columns from the validated payload _(Slice 4)_ — `requests/extractors.ts`; `leave`/`wfh` map to `startDate`/`endDate`/`totalDays`/`halfDayCount`/`leaveTypeId`/`departmentId`/`projectId` (WFH's `totalDays` is derived from the date range, no such field exists on that form); Visitor/IT extract nothing (no absence-calendar columns apply)
+- [x] 3.3 Write the initial status + first `RequestStatusHistory` row + audit log entry on create _(Slice 4)_ — one `prisma.$transaction`; initial status = the form's `statusModel.states[0]` (e.g. `Draft`/`Pre-Registered`/`Requested`); history row has `fromState: null`; audit entry mirrors the `FormDefinition` publish pattern. Verified end-to-end against a live tenant: valid leave submission produced `Draft` status, correct promoted columns, one history row, one audit entry; hidden-field and missing-conditionally-required payloads were rejected with the right per-field error
 
 ## 4. Status Lifecycle Engine
 

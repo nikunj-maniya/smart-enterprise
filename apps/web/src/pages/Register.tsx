@@ -1,22 +1,10 @@
 import * as React from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { Mail, Lock, ShieldCheck, ArrowRight, ChevronDown, MailCheck } from 'lucide-react';
+import { COMPANY_SIZE_OPTIONS, INDUSTRY_OPTIONS } from '@se/shared';
 import { Button } from '@/components/ui/button';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-
-const INDUSTRY_OPTIONS = [
-  'Technology',
-  'Finance & Banking',
-  'Healthcare',
-  'Retail & E-commerce',
-  'Manufacturing',
-  'Education',
-  'Government',
-  'Other',
-];
-
-const SIZE_OPTIONS = ['<20', '20–50', '50–120', '120–500', '500–2000', '2000+'];
 
 /** Brand logo mark for use on light backgrounds (matches ChangePassword). */
 function LogoMark() {
@@ -82,7 +70,7 @@ function RegSelect({
   required?: boolean;
   value: string;
   onChange: (v: string) => void;
-  options: string[];
+  options: readonly string[];
   placeholder?: string;
 }) {
   return (
@@ -227,7 +215,7 @@ export default function Register() {
                 required
                 value={size}
                 onChange={setSize}
-                options={SIZE_OPTIONS}
+                options={COMPANY_SIZE_OPTIONS}
               />
               <RegField
                 label="Website"

@@ -58,7 +58,13 @@ export async function submitRegistration(
   const passwordHash = await argon2.hash(input.password);
   const registration = await prisma.$transaction(async (tx) => {
     const tenant = await tx.tenant.create({
-      data: { name: input.companyName, status: TenantStatus.Pending },
+      data: {
+        name: input.companyName,
+        industry: input.industry,
+        size: input.size,
+        website: input.website,
+        status: TenantStatus.Pending,
+      },
     });
     const user = await tx.user.create({
       data: {

@@ -1,10 +1,14 @@
 import { Prisma } from '@prisma/client';
 import {
   parseDefinition,
+  type FieldOptions,
+  type FieldType,
+  type FieldValidation,
   type FormDefinition,
   type FormDefinitionDto,
   type FormDefinitionSummaryDto,
   type PublishDefinitionInput,
+  type VisibilityRule,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
@@ -71,15 +75,58 @@ export async function listForms(tenantId: string): Promise<FormDefinitionSummary
   return [...latestByKey.values()];
 }
 
-/** GET /forms/:key — the tenant's full latest published definition for a key. */
-export async function getFormByKey(tenantId: string, key: string): Promise<FormDefinitionDto> {
+/** Tenant's latest published row-set for a form key, or 404. */
+async function findPublished(tenantId: string, key: string): Promise<DefinitionWithGraph> {
   const def = await prisma.formDefinition.findFirst({
     where: { tenantId, key, status: 'published' },
     orderBy: { version: 'desc' },
     include: fullInclude,
   });
   if (!def) throw new HttpError(404, 'Form not found');
-  return toDefinitionDto(def);
+  return def;
+}
+
+/** GET /forms/:key — the tenant's full latest published definition for a key. */
+export async function getFormByKey(tenantId: string, key: string): Promise<FormDefinitionDto> {
+  return toDefinitionDto(await findPublished(tenantId, key));
+}
+
+/** Prisma row-set → the shared engine's `FormDefinition` (nulls → undefined, unlike the DTO). */
+function toFormDefinition(def: DefinitionWithGraph): FormDefinition {
+  return {
+    id: def.id,
+    key: def.key,
+    title: def.title,
+    version: def.version,
+    renderer: def.renderer,
+    status: def.status,
+    sections: def.sections.map((s) => ({
+      order: s.order,
+      title: s.title,
+      visibilityRule: (s.visibilityRule ?? undefined) as VisibilityRule | undefined,
+      fields: s.fields.map((f) => ({
+        key: f.key,
+        label: f.label,
+        type: f.type as FieldType,
+        required: f.required,
+        options: (f.options ?? undefined) as FieldOptions | undefined,
+        validation: (f.validation ?? undefined) as FieldValidation | undefined,
+        visibilityRule: (f.visibilityRule ?? undefined) as VisibilityRule | undefined,
+      })),
+    })),
+  };
+}
+
+/** The tenant's latest published definition, ready for server-side (re)validation, plus id/version to pin and the status its state machine starts every new request in. */
+export async function getPublishedDefinitionForSubmission(
+  tenantId: string,
+  key: string,
+): Promise<{ id: string; version: number; definition: FormDefinition; initialStatus: string }> {
+  const def = await findPublished(tenantId, key);
+  const states = def.statusModel?.states;
+  const initialStatus = Array.isArray(states) ? states[0] : undefined;
+  if (typeof initialStatus !== 'string') throw new HttpError(400, 'Form has no status model');
+  return { id: def.id, version: def.version, definition: toFormDefinition(def), initialStatus };
 }
 
 /** Version lookup + row-set insert + audit log, run against one client (own tx or a caller's). */
