@@ -15,6 +15,7 @@ import { rolesRouter } from './modules/roles/roles.routes.js';
 import { orgUsersRouter } from './modules/org-users/org-users.routes.js';
 import { projectsRouter } from './modules/projects/projects.routes.js';
 import { formsRouter } from './modules/forms/forms.routes.js';
+import { requestsRouter } from './modules/requests/requests.routes.js';
 import { profileRouter } from './modules/profile/profile.routes.js';
 import {
   selfRegistrationRouter,
@@ -48,6 +49,7 @@ app.use('/roles', rolesRouter);
 app.use('/org-users', orgUsersRouter);
 app.use('/projects', projectsRouter);
 app.use('/forms', formsRouter);
+app.use('/requests', requestsRouter);
 app.use('/profile', profileRouter);
 app.use('/self-registration', selfRegistrationRouter);
 app.use('/public/self-registration', publicSelfRegistrationRouter);

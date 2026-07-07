@@ -12,9 +12,9 @@
 
 ## 3. Request Submission
 
-- [ ] 3.1 `POST /requests` validating payload against the pinned version via the compiled Zod schema _(Slice 4)_
-- [ ] 3.2 Server-side extractor map deriving promoted typed columns from the validated payload _(Slice 4)_
-- [ ] 3.3 Write the initial status + first `RequestStatusHistory` row + audit log entry on create _(Slice 4)_
+- [x] 3.1 `POST /requests` validating payload against the pinned version via the compiled Zod schema _(Slice 4)_ — `modules/requests/`; resolves+pins latest published version, re-validates via shared `validatePayload` → 400 `{fields}`; verified hidden⇒absent + conditionally-required both rejected
+- [x] 3.2 Server-side extractor map deriving promoted typed columns from the validated payload _(Slice 4)_ — per-formKey map (leave/wfh/visitor); derives startDate/endDate/totalDays/halfDayCount/leaveTypeId/departmentId/projectId from validated payload only, never client columns
+- [x] 3.3 Write the initial status + first `RequestStatusHistory` row + audit log entry on create _(Slice 4)_ — initial status from statusModel (Leave/WFH→Submitted, Visitor→Pre-Registered, IT→Requested); Request + one history row (null→initial) + Request/create audit in one tx; version pin verified across republish
 
 ## 4. Status Lifecycle Engine
 

@@ -743,6 +743,32 @@ export interface PublishDefinitionInput extends PublishFormRequest {
   key: string;
 }
 
+// ── Request submission (form-engine, tenant-scoped) — PRD §6.5/§9 ──
+/** Submit body: the form key + the answer payload (re-validated server-side against the pinned version). */
+export const createRequestSchema = z.object({
+  formKey: z.string().min(1, 'Form key is required'),
+  payload: z.record(z.unknown()),
+});
+export type CreateRequestRequest = z.infer<typeof createRequestSchema>;
+
+/** A created request — the stored JSONB payload plus the server-extracted promoted columns. */
+export const requestDtoSchema = z.object({
+  id: z.string(),
+  formKey: z.string(),
+  formVersion: z.number().int(),
+  status: z.string(),
+  payload: z.record(z.unknown()),
+  startDate: z.string().nullable(),
+  endDate: z.string().nullable(),
+  totalDays: z.number().nullable(),
+  halfDayCount: z.number().nullable(),
+  leaveTypeId: z.string().nullable(),
+  departmentId: z.string().nullable(),
+  projectId: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type RequestDto = z.infer<typeof requestDtoSchema>;
+
 // ── Profile (self-service, any authenticated user) ─────────────
 export const profileSchema = z.object({
   id: z.string(),
