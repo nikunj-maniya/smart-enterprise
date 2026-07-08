@@ -1,13 +1,16 @@
 import { Prisma } from '@prisma/client';
 import {
   parseDefinition,
+  type CreateFormDraftRequest,
   type FieldOptions,
   type FieldType,
   type FieldValidation,
+  type FormBuilderListItemDto,
   type FormDefinition,
   type FormDefinitionDto,
   type FormDefinitionSummaryDto,
   type PublishDefinitionInput,
+  type SaveDraftFieldsRequest,
   type VisibilityRule,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
@@ -242,4 +245,160 @@ export async function publishDefinition(
     : await prisma.$transaction((t) => insertDefinition(t, tenantId, actorId, input, parsed));
 
   return toDefinitionDto(created);
+}
+
+// ── Form Builder admin CRUD (form-builder, Slice 1) ─────────────
+
+/** Title → a URL/key-safe slug ("IT Asset Request" → "it-asset-request"). */
+function slugifyTitle(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** GET /forms/drafts — admin list: the latest version (draft or published) per form key, with field count. */
+export async function listFormsForBuilder(tenantId: string): Promise<FormBuilderListItemDto[]> {
+  const rows = await prisma.formDefinition.findMany({
+    where: { tenantId },
+    orderBy: { version: 'desc' },
+    select: {
+      key: true,
+      title: true,
+      renderer: true,
+      status: true,
+      updatedAt: true,
+      sections: { select: { fields: { select: { id: true } } } },
+    },
+  });
+  const latestByKey = new Map<string, FormBuilderListItemDto>();
+  for (const r of rows) {
+    if (latestByKey.has(r.key)) continue;
+    latestByKey.set(r.key, {
+      key: r.key,
+      title: r.title,
+      renderer: r.renderer,
+      status: r.status,
+      fieldCount: r.sections.reduce((n, s) => n + s.fields.length, 0),
+      updatedAt: r.updatedAt.toISOString(),
+    });
+  }
+  return [...latestByKey.values()];
+}
+
+/** Tenant's latest draft row-set for a form key, or 404. */
+async function findDraft(tenantId: string, key: string): Promise<DefinitionWithGraph> {
+  const def = await prisma.formDefinition.findFirst({
+    where: { tenantId, key, status: 'draft' },
+    orderBy: { version: 'desc' },
+    include: fullInclude,
+  });
+  if (!def) throw new HttpError(404, 'Draft not found');
+  return def;
+}
+
+/** GET /forms/drafts/:key — the tenant's current draft definition for a key, for builder editing. */
+export async function getFormDraft(tenantId: string, key: string): Promise<FormDefinitionDto> {
+  return toDefinitionDto(await findDraft(tenantId, key));
+}
+
+/**
+ * POST /forms/drafts — create a brand-new custom form as a Draft (version 1, no fields yet).
+ * Slice 1 only supports authoring new forms this way; opening an existing (core or already-
+ * published) form for a new draft is Slice 3/7's job.
+ */
+export async function createFormDraft(
+  tenantId: string,
+  actorId: string,
+  input: CreateFormDraftRequest,
+): Promise<FormDefinitionDto> {
+  const key = slugifyTitle(input.title);
+  if (!key) throw new HttpError(400, 'Title must contain at least one letter or number');
+
+  const clash = await prisma.formDefinition.findFirst({ where: { tenantId, key }, select: { id: true } });
+  if (clash) throw new HttpError(409, 'A form with this name already exists');
+
+  const created = await prisma.$transaction(async (tx) => {
+    const def = await tx.formDefinition.create({
+      data: {
+        tenantId,
+        key,
+        title: input.title,
+        version: 1,
+        renderer: 'generic',
+        status: 'draft',
+        sections: { create: [{ order: 0, title: 'Fields', fields: { create: [] } }] },
+      },
+      include: fullInclude,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'FormDefinition',
+        entityId: def.id,
+        action: 'create_draft',
+        after: { key: def.key, title: def.title, version: def.version },
+      },
+    });
+    return def;
+  });
+
+  return toDefinitionDto(created);
+}
+
+/**
+ * PUT /forms/drafts/:key — replace the draft's field-set wholesale (add/edit/delete/reorder all
+ * collapse to one save). The draft has exactly one section (created with the draft); fields are
+ * deleted and recreated in the given order, never mutating a published row.
+ */
+export async function saveDraftFields(
+  tenantId: string,
+  actorId: string,
+  key: string,
+  input: SaveDraftFieldsRequest,
+): Promise<FormDefinitionDto> {
+  const draft = await findDraft(tenantId, key);
+  const section = draft.sections[0];
+  if (!section) throw new HttpError(400, 'Draft has no section to hold fields');
+  const beforeCount = section.fields.length;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.formField.deleteMany({ where: { sectionId: section.id } });
+    await tx.formSection.update({
+      where: { id: section.id },
+      data: {
+        fields: {
+          create: input.fields.map((f, i) => ({
+            key: f.key,
+            label: f.label,
+            type: f.type,
+            order: i,
+            required: f.required,
+            options: jsonInput(f.options),
+            validation: jsonInput(f.validation),
+            visibilityRule: jsonInput(f.visibilityRule),
+          })),
+        },
+      },
+    });
+    // Nested writes above don't touch the parent row — bump it explicitly so the builder
+    // list's "updated {date}" reflects this save.
+    await tx.formDefinition.update({ where: { id: draft.id }, data: {} });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'FormDefinition',
+        entityId: draft.id,
+        action: 'save_draft_fields',
+        before: { fieldCount: beforeCount },
+        after: { fieldCount: input.fields.length },
+      },
+    });
+    return tx.formDefinition.findUniqueOrThrow({ where: { id: draft.id }, include: fullInclude });
+  });
+
+  return toDefinitionDto(updated);
 }

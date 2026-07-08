@@ -10,6 +10,7 @@ import {
   ScrollText,
   Settings,
   LogOut,
+  LayoutTemplate,
   type LucideIcon,
 } from 'lucide-react';
 import { SystemRoleKey } from '@se/shared';
@@ -31,6 +32,7 @@ const organizationNav: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/organization/roles', label: 'Roles', icon: Shield },
   { to: '/organization/projects', label: 'Projects', icon: FolderKanban },
   { to: '/organization/details', label: 'Company Details', icon: Building2 },
+  { to: '/organization/form-builder', label: 'Form Builder', icon: LayoutTemplate },
 ];
 
 function SidebarLink({

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { formFieldSchema } from './form-engine/index.js';
 
 export * from './form-engine/index.js';
 
@@ -755,6 +756,34 @@ export type PublishFormRequest = z.infer<typeof publishFormRequestSchema>;
 export interface PublishDefinitionInput extends PublishFormRequest {
   key: string;
 }
+
+// ── Form Builder admin API (form-builder, tenant-scoped) — PRD §6 ────
+/** Admin list row: the latest version (draft or published) per form key. */
+export const formBuilderListItemSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  renderer: z.enum(['core', 'generic']),
+  status: z.enum(['draft', 'published', 'archived']),
+  fieldCount: z.number().int(),
+  updatedAt: z.string(),
+});
+export type FormBuilderListItemDto = z.infer<typeof formBuilderListItemSchema>;
+
+/** POST /forms/drafts — create a brand-new custom form as a Draft (version 1, empty field-set). */
+export const createFormDraftRequestSchema = z.object({
+  title: z.string().min(1, 'Title is required'),
+});
+export type CreateFormDraftRequest = z.infer<typeof createFormDraftRequestSchema>;
+
+/** PUT /forms/drafts/:key — replace the draft's field-set wholesale; field keys must be unique. */
+export const saveDraftFieldsRequestSchema = z.object({
+  fields: z
+    .array(formFieldSchema)
+    .refine((fields) => new Set(fields.map((f) => f.key)).size === fields.length, {
+      message: 'Field keys must be unique within a form',
+    }),
+});
+export type SaveDraftFieldsRequest = z.infer<typeof saveDraftFieldsRequestSchema>;
 
 // ── Request submission (form-engine, tenant-scoped) — PRD §6/§9 ────
 export const createRequestSchema = z.object({

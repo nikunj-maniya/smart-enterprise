@@ -1,8 +1,8 @@
 ## 1. Builder — Fields
 
-- [ ] 1.1 Form CRUD APIs: create/list/read drafts, save draft field-set, guardrail validation, audit-logged _(Slice 1)_
-- [ ] 1.2 Build the two-pane builder per the design (form list with badges, field rows with drag handle, Required toggle, edit/delete) _(Slice 1)_
-- [ ] 1.3 Add/Edit Field modal (label, §6.3 type select, required) wired to draft save _(Slice 1)_
+- [x] 1.1 Form CRUD APIs: create/list/read drafts, save draft field-set, guardrail validation, audit-logged _(Slice 1)_ — `apps/api/prisma/schema.prisma` + migration `20260708053955_form_definition_timestamps` add `createdAt`/`updatedAt` to `FormDefinition`; `modules/forms/` extended with `GET/POST /forms/drafts` + `GET/PUT /forms/drafts/:key` (Enterprise Admin, tenant-scoped, registered before `/:key`); guardrails via `saveDraftFieldsRequestSchema` (§6.3 type enum, unique keys, non-empty label) and `createFormDraftRequestSchema` (slugified key, 409 on collision); `create_draft`/`save_draft_fields` audit rows written. Verified end-to-end live against Postgres incl. tenant isolation, RBAC 401/403, and 404 route-ordering
+- [x] 1.2 Build the two-pane builder per the design (form list with badges, field rows with drag handle, Required toggle, edit/delete) _(Slice 1)_ — `pages/organization/FormBuilder.tsx` (list pane from `GET /forms/drafts` with fieldCount/updated/Draft-Published badge; field-editor pane with `grip-vertical` drag handle, native HTML5 DnD reorder, clickable Required/Optional pill, edit/delete), route `/organization/form-builder` gated `RequireRole(EnterpriseAdmin)` + sidebar entry added. Published/core forms render read-only pending Slice 3/7 draft-start
+- [x] 1.3 Add/Edit Field modal (label, §6.3 type select, required) wired to draft save _(Slice 1)_ — `components/form-engine/FieldModal.tsx`: label input, §6.3 `FIELD_TYPE_OPTIONS` select (excludes deferred `signature`), Required `Switch`; `onSave` merges into `FormBuilder.tsx`'s field list and persists via the same `PUT /forms/drafts/:key`, preserving untouched field properties (options/validation/visibilityRule) on edit
 - [ ] 1.4 Field visibility-rule editing (show-when conditions referencing other fields) _(Slice 2)_
 
 ## 2. Publish & Versioning
