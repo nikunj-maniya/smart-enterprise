@@ -1,3 +1,5 @@
+import type { DirectoryProjectsResponse, DirectoryUsersResponse, RequestDto } from '@se/shared';
+
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
 const ACCESS_KEY = 'se.accessToken';
@@ -21,6 +23,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Per-field error map from a 400 validation failure (e.g. `POST /requests`), if present. */
+    public details?: Record<string, string[]>,
   ) {
     super(message);
   }
@@ -37,7 +41,40 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   if (!res.ok) {
     const message = (data && (data.error as string)) || `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, data?.details);
   }
   return data as T;
+}
+
+/**
+ * Directory search backing `user-picker`/`project-picker` fields (PRD §6.3) — the
+ * capped, tenant-scoped lookups the core renderer's pickers call as the user types.
+ */
+export function searchDirectoryUsers(query: {
+  search?: string;
+  roles?: string[];
+  departments?: string[];
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.roles?.length) params.set('roles', query.roles.join(','));
+  if (query.departments?.length) params.set('departments', query.departments.join(','));
+  if (query.limit) params.set('limit', String(query.limit));
+  return apiFetch<DirectoryUsersResponse>(`/directory/users?${params.toString()}`);
+}
+
+export function searchDirectoryProjects(query: { search?: string; limit?: number }) {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.limit) params.set('limit', String(query.limit));
+  return apiFetch<DirectoryProjectsResponse>(`/directory/projects?${params.toString()}`);
+}
+
+/** `POST /requests` — submit a request against a published form's pinned version. On a 400, `ApiError.details` carries the per-field error map to feed back into the renderer. */
+export function submitRequest(formKey: string, payload: Record<string, unknown>) {
+  return apiFetch<RequestDto>('/requests', {
+    method: 'POST',
+    body: JSON.stringify({ formKey, payload }),
+  });
 }

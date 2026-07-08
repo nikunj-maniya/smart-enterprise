@@ -4,3 +4,4 @@ export * from './metadata.js';
 export * from './compile.js';
 export * from './fixtures.js';
 export * from './status-model.js';
+export * from './directory.js';

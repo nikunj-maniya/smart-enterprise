@@ -16,6 +16,7 @@ import { orgUsersRouter } from './modules/org-users/org-users.routes.js';
 import { projectsRouter } from './modules/projects/projects.routes.js';
 import { formsRouter } from './modules/forms/forms.routes.js';
 import { requestsRouter } from './modules/requests/requests.routes.js';
+import { directoryRouter } from './modules/directory/directory.routes.js';
 import { profileRouter } from './modules/profile/profile.routes.js';
 import { enterpriseProfileRouter } from './modules/enterprise-profile/enterprise-profile.routes.js';
 import {
@@ -52,6 +53,7 @@ app.use('/org-users', orgUsersRouter);
 app.use('/projects', projectsRouter);
 app.use('/forms', formsRouter);
 app.use('/requests', requestsRouter);
+app.use('/directory', directoryRouter);
 app.use('/profile', profileRouter);
 app.use('/enterprise-profile', enterpriseProfileRouter);
 app.use('/self-registration', selfRegistrationRouter);
