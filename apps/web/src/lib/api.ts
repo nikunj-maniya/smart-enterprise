@@ -1,4 +1,10 @@
-import type { DirectoryProjectsResponse, DirectoryUsersResponse, RequestDto } from '@se/shared';
+import type {
+  DirectoryProjectsResponse,
+  DirectoryUsersResponse,
+  FormDefinitionDto,
+  FormDefinitionSummaryDto,
+  RequestDto,
+} from '@se/shared';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 
@@ -69,6 +75,16 @@ export function searchDirectoryProjects(query: { search?: string; limit?: number
   if (query.search) params.set('search', query.search);
   if (query.limit) params.set('limit', String(query.limit));
   return apiFetch<DirectoryProjectsResponse>(`/directory/projects?${params.toString()}`);
+}
+
+/** `GET /forms` — the tenant's published forms (latest version per key) for the employee New Request list. */
+export function listPublishedForms() {
+  return apiFetch<FormDefinitionSummaryDto[]>('/forms');
+}
+
+/** `GET /forms/:key` — the tenant's latest published definition for a form key, for the generic renderer. */
+export function getPublishedForm(key: string) {
+  return apiFetch<FormDefinitionDto>(`/forms/${key}`);
 }
 
 /** `POST /requests` — submit a request against a published form's pinned version. On a 400, `ApiError.details` carries the per-field error map to feed back into the renderer. */

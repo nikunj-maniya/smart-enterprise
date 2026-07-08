@@ -16,7 +16,8 @@ export async function createRequest(
   requesterId: string,
   input: CreateRequestInput,
 ): Promise<RequestDto> {
-  // 404 if the form has no published version; 400 if it has no status model.
+  // 404 if the form has no published version; a form with no configured status model
+  // falls back to the generic default initial status.
   const form = await formsService.getPublishedDefinitionForSubmission(tenantId, input.formKey);
 
   const result = validatePayload(form.definition, input.payload);

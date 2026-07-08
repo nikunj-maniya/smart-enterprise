@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import {
+  DEFAULT_GENERIC_INITIAL_STATUS,
   parseDefinition,
   type CreateFormDraftRequest,
   type FieldOptions,
@@ -120,15 +121,15 @@ function toFormDefinition(def: DefinitionWithGraph): FormDefinition {
   };
 }
 
-/** The tenant's latest published definition, ready for server-side (re)validation, plus id/version to pin and the status its state machine starts every new request in. */
+/** The tenant's latest published definition, ready for server-side (re)validation, plus id/version to pin and the status its state machine starts every new request in. A custom form without a configured status model falls back to the generic default so it stays submittable. */
 export async function getPublishedDefinitionForSubmission(
   tenantId: string,
   key: string,
 ): Promise<{ id: string; version: number; definition: FormDefinition; initialStatus: string }> {
   const def = await findPublished(tenantId, key);
   const states = def.statusModel?.states;
-  const initialStatus = Array.isArray(states) ? states[0] : undefined;
-  if (typeof initialStatus !== 'string') throw new HttpError(400, 'Form has no status model');
+  const initialStatus =
+    Array.isArray(states) && typeof states[0] === 'string' ? states[0] : DEFAULT_GENERIC_INITIAL_STATUS;
   return { id: def.id, version: def.version, definition: toFormDefinition(def), initialStatus };
 }
 

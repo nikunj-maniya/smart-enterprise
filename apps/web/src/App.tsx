@@ -23,6 +23,9 @@ import Roles from '@/pages/organization/Roles';
 import Projects from '@/pages/organization/Projects';
 import CompanyDetails from '@/pages/organization/CompanyDetails';
 import FormBuilder from '@/pages/organization/FormBuilder';
+import NewRequest from '@/pages/requests/NewRequest';
+import RequestForm from '@/pages/requests/RequestForm';
+import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/auth';
 
 /** Landing routes each persona to their home. Employee request screens land in a later change. */
@@ -35,23 +38,23 @@ function Home() {
   return <MemberHome />;
 }
 
-/** Placeholder home for members with no admin section yet (request screens arrive in a later change). */
+/** Employee home: a request workspace entry point (My Requests list arrives in a later change). */
 function MemberHome() {
   const { user } = useAuth();
   return (
     <>
       <PageHeader
         title={`Welcome, ${user?.name?.split(' ')[0] ?? ''}`.trim()}
-        subtitle="Your request workspace is being set up."
+        subtitle="Submit a request and track its progress."
         breadcrumb={user?.tenantName ?? 'Workspace'}
       />
-      <div className="mt-6 rounded-lg border border-dashed border-line bg-surface p-12 text-center text-sm text-ink-400">
-        Request forms (Leave, WFH, Visitor, IT) will appear here soon. In the meantime you can
-        update your details from{' '}
-        <Link to="/profile" className="font-semibold text-brand-hover">
-          your profile
-        </Link>
-        .
+      <div className="mt-6 rounded-lg border border-dashed border-line bg-surface p-12 text-center">
+        <div className="text-sm text-ink-400">Ready to get started?</div>
+        <div className="mt-4 flex justify-center">
+          <Button asChild>
+            <Link to="/requests/new">Start a new request</Link>
+          </Button>
+        </div>
       </div>
     </>
   );
@@ -87,6 +90,8 @@ export default function App() {
         <Route path="/audit" element={<AuditLog />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/requests/new" element={<NewRequest />} />
+        <Route path="/requests/new/:key" element={<RequestForm />} />
         <Route
           path="/organization/users"
           element={
