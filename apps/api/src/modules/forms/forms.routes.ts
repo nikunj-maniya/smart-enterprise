@@ -10,5 +10,7 @@ formsRouter.get('/drafts', requireAuth, requireEnterpriseAdmin, formsController.
 formsRouter.post('/drafts', requireAuth, requireEnterpriseAdmin, formsController.createDraft);
 formsRouter.get('/drafts/:key', requireAuth, requireEnterpriseAdmin, formsController.getDraft);
 formsRouter.put('/drafts/:key', requireAuth, requireEnterpriseAdmin, formsController.saveDraft);
+formsRouter.post('/drafts/:key/publish', requireAuth, requireEnterpriseAdmin, formsController.publishDraft);
+formsRouter.post('/drafts/:key/start', requireAuth, requireEnterpriseAdmin, formsController.startDraft);
 formsRouter.get('/:key', requireAuth, formsController.getByKey);
 formsRouter.post('/:key/publish', requireAuth, requireEnterpriseAdmin, formsController.publish);

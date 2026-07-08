@@ -305,8 +305,8 @@ export async function getFormDraft(tenantId: string, key: string): Promise<FormD
 
 /**
  * POST /forms/drafts — create a brand-new custom form as a Draft (version 1, no fields yet).
- * Slice 1 only supports authoring new forms this way; opening an existing (core or already-
- * published) form for a new draft is Slice 3/7's job.
+ * Opening an existing published (non-core) form for a new draft is `startFormDraft` (Slice 3);
+ * core forms remain Slice 7's job.
  */
 export async function createFormDraft(
   tenantId: string,
@@ -401,4 +401,156 @@ export async function saveDraftFields(
   });
 
   return toDefinitionDto(updated);
+}
+
+// ── Publish & new-draft-from-published (form-builder, Slice 3) ─────────────
+
+/**
+ * POST /forms/drafts/:key/publish — publish the tenant's current draft for a key. Re-validates the
+ * draft's field-set via the shared engine's guardrails, then flips that same row-set to `published`
+ * in place (its version number becomes the published version) so employees see it in New Request.
+ * The row is never mutated again afterwards — the next edit goes through `startFormDraft` below.
+ */
+export async function publishDraft(tenantId: string, actorId: string, key: string): Promise<FormDefinitionDto> {
+  const draft = await findDraft(tenantId, key);
+
+  const fieldCount = draft.sections.reduce((n, s) => n + s.fields.length, 0);
+  if (fieldCount === 0) {
+    throw new HttpError(400, 'Add at least one field before publishing this form');
+  }
+
+  try {
+    parseDefinition({
+      id: draft.id,
+      key: draft.key,
+      title: draft.title,
+      version: draft.version,
+      renderer: draft.renderer,
+      status: 'published',
+      sections: draft.sections.map((s) => ({
+        order: s.order,
+        title: s.title,
+        visibilityRule: (s.visibilityRule ?? undefined) as VisibilityRule | undefined,
+        fields: s.fields.map((f) => ({
+          key: f.key,
+          label: f.label,
+          type: f.type as FieldType,
+          required: f.required,
+          options: (f.options ?? undefined) as FieldOptions | undefined,
+          validation: (f.validation ?? undefined) as FieldValidation | undefined,
+          visibilityRule: (f.visibilityRule ?? undefined) as VisibilityRule | undefined,
+        })),
+      })),
+    });
+  } catch (err) {
+    throw new HttpError(400, err instanceof Error ? err.message : 'Invalid form definition');
+  }
+
+  const published = await prisma.$transaction(async (tx) => {
+    const def = await tx.formDefinition.update({
+      where: { id: draft.id },
+      data: { status: 'published' },
+      include: fullInclude,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'FormDefinition',
+        entityId: def.id,
+        action: 'publish',
+        after: { key: def.key, title: def.title, version: def.version },
+      },
+    });
+    return def;
+  });
+
+  return toDefinitionDto(published);
+}
+
+/**
+ * POST /forms/drafts/:key/start — begin editing a published, non-core form: clone its latest
+ * published row-set into a new Draft at `version + 1`, leaving the published row untouched
+ * (immutable). Idempotent — if a draft already exists for the key, it's returned as-is. Core
+ * forms aren't editable through the builder yet (Slice 7).
+ */
+export async function startFormDraft(tenantId: string, actorId: string, key: string): Promise<FormDefinitionDto> {
+  const existingDraft = await prisma.formDefinition.findFirst({
+    where: { tenantId, key, status: 'draft' },
+    orderBy: { version: 'desc' },
+    include: fullInclude,
+  });
+  if (existingDraft) return toDefinitionDto(existingDraft);
+
+  const published = await findPublished(tenantId, key);
+  if (published.renderer === 'core') {
+    throw new HttpError(400, 'Core forms are not editable in the builder yet');
+  }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const def = await tx.formDefinition.create({
+      data: {
+        tenantId,
+        key: published.key,
+        title: published.title,
+        version: published.version + 1,
+        renderer: published.renderer,
+        status: 'draft',
+        sections: {
+          create: published.sections.map((s) => ({
+            order: s.order,
+            title: s.title,
+            visibilityRule: jsonInput(s.visibilityRule),
+            fields: {
+              create: s.fields.map((f, i) => ({
+                key: f.key,
+                label: f.label,
+                type: f.type,
+                order: i,
+                required: f.required,
+                options: jsonInput(f.options),
+                validation: jsonInput(f.validation),
+                visibilityRule: jsonInput(f.visibilityRule),
+              })),
+            },
+          })),
+        },
+        ...(published.approvalWorkflow
+          ? {
+              approvalWorkflow: {
+                create: {
+                  mode: published.approvalWorkflow.mode,
+                  stageRules: jsonInput(published.approvalWorkflow.stageRules),
+                },
+              },
+            }
+          : {}),
+        ...(published.statusModel
+          ? {
+              statusModel: {
+                create: {
+                  states: published.statusModel.states as Prisma.InputJsonValue,
+                  transitions: published.statusModel.transitions as Prisma.InputJsonValue,
+                },
+              },
+            }
+          : {}),
+      },
+      include: fullInclude,
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'FormDefinition',
+        entityId: def.id,
+        action: 'start_draft',
+        before: { fromVersion: published.version },
+        after: { key: def.key, title: def.title, version: def.version },
+      },
+    });
+    return def;
+  });
+
+  return toDefinitionDto(created);
 }
