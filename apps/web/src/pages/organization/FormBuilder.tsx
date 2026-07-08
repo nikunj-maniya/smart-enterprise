@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Check, FileText, GripVertical, PencilLine, Plus, Trash2 } from 'lucide-react';
+import { collectRuleFields, visibilityRuleSchema } from '@se/shared';
 import type {
   CreateFormDraftRequest,
   FieldType,
@@ -62,12 +63,25 @@ function formattedDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** Labels of other fields whose visibility rule references `key` — deleting `key` would leave
+ * those rules with a dangling reference, so the caller should block the delete until they're gone. */
+function fieldsReferencing(fields: FormFieldDto[], key: string): string[] {
+  return fields
+    .filter((f) => f.key !== key)
+    .filter((f) => {
+      const parsed = visibilityRuleSchema.safeParse(f.visibilityRule);
+      return parsed.success && collectRuleFields(parsed.data.when).includes(key);
+    })
+    .map((f) => f.label);
+}
+
 /**
- * Two-pane admin Form Builder (PRD §6/§16, form-builder Slice 1): a form list (name, field
+ * Two-pane admin Form Builder (PRD §6/§16, form-builder Slice 1-3): a form list (name, field
  * count, last updated, Draft/Published badge) and a field editor (drag-reorder, Required
  * toggle, edit/delete, Add/Edit Field modal) — every mutation saves immediately as a Draft
- * via `PUT /forms/drafts/:key`. Publishing (guardrail validation + immutable version) is
- * wired in a later slice; the Publish button is shown per the design but disabled here.
+ * via `PUT /forms/drafts/:key`. Publish flips the draft to an immutable published version
+ * (`POST /forms/drafts/:key/publish`); editing a published custom form starts a new draft
+ * (`POST /forms/drafts/:key/start`). Core forms stay read-only in the builder until Slice 7.
  */
 export default function FormBuilder() {
   const { user } = useAuth();
@@ -79,6 +93,8 @@ export default function FormBuilder() {
   const [detailError, setDetailError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
+  const [publishing, setPublishing] = React.useState(false);
+  const [startingDraft, setStartingDraft] = React.useState(false);
   const [fieldModal, setFieldModal] = React.useState<{ mode: 'add' | 'edit'; field: FormFieldDto | null } | null>(
     null,
   );
@@ -162,6 +178,13 @@ export default function FormBuilder() {
   }
 
   function onDeleteField(field: FormFieldDto) {
+    const referencedBy = fieldsReferencing(fields, field.key);
+    if (referencedBy.length > 0) {
+      setSaveError(
+        `Can't delete "${field.label}" — remove the visibility condition on ${referencedBy.join(', ')} first.`,
+      );
+      return;
+    }
     persist(fields.filter((f) => f.key !== field.key));
   }
 
@@ -181,9 +204,40 @@ export default function FormBuilder() {
     const exists = fields.some((f) => f.key === input.key);
     const next: FormFieldDto[] = exists
       ? fields.map((f) => (f.key === input.key ? { ...f, ...input } : f))
-      : [...fields, { ...input, options: input.options ?? null, validation: null, visibilityRule: null }];
+      : [
+          ...fields,
+          { ...input, options: input.options ?? null, validation: null, visibilityRule: input.visibilityRule ?? null },
+        ];
     const ok = await persist(next);
     if (ok) setFieldModal(null);
+  }
+
+  async function onPublish() {
+    if (!selectedKey) return;
+    setPublishing(true);
+    setSaveError(null);
+    try {
+      await apiFetch<FormDefinitionDto>(`/forms/drafts/${selectedKey}/publish`, { method: 'POST' });
+      await load();
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : 'Unable to publish this form.');
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  async function onStartDraft() {
+    if (!selectedKey) return;
+    setStartingDraft(true);
+    setSaveError(null);
+    try {
+      await apiFetch<FormDefinitionDto>(`/forms/drafts/${selectedKey}/start`, { method: 'POST' });
+      await load();
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : 'Unable to start a new draft.');
+    } finally {
+      setStartingDraft(false);
+    }
   }
 
   async function onCreateForm() {
@@ -285,8 +339,18 @@ export default function FormBuilder() {
               </div>
 
               {!isEditable && (
-                <div className="border-b border-line-soft bg-app-bg px-5 py-3 text-[12.5px] text-ink-400">
-                  This form is published — editing to start a new draft is coming in a later release.
+                <div className="flex items-center justify-between gap-3 border-b border-line-soft bg-app-bg px-5 py-3 text-[12.5px] text-ink-400">
+                  {selectedItem.renderer === 'core' ? (
+                    <span>Core forms are not editable in the builder yet.</span>
+                  ) : (
+                    <>
+                      <span>This form is published. Start a new draft to make changes.</span>
+                      <Button size="sm" variant="secondary" disabled={startingDraft} onClick={onStartDraft}>
+                        <PencilLine size={14} />
+                        {startingDraft ? 'Starting…' : 'Edit'}
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -301,63 +365,79 @@ export default function FormBuilder() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-[10px]">
-                    {fields.map((field, index) => (
-                      <div
-                        key={field.key}
-                        draggable={isEditable}
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', String(index));
-                          setDragIndex(index);
-                        }}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => onDrop(index)}
-                        className="flex items-center gap-3 rounded-[10px] border border-line-soft bg-app-bg px-[14px] py-3"
-                      >
-                        <GripVertical
-                          size={16}
-                          className={`flex-none text-ink-300 ${isEditable ? 'cursor-grab' : 'opacity-50'}`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold text-ink-900">{field.label}</div>
-                          <div className="truncate text-xs text-ink-400">{fieldTypeLabel(field.type)}</div>
+                    {fields.map((field, index) => {
+                      const referencedBy = fieldsReferencing(fields, field.key);
+                      return (
+                        <div
+                          key={field.key}
+                          draggable={isEditable}
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', String(index));
+                            setDragIndex(index);
+                          }}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => onDrop(index)}
+                          className="flex items-center gap-3 rounded-[10px] border border-line-soft bg-app-bg px-[14px] py-3"
+                        >
+                          <GripVertical
+                            size={16}
+                            className={`flex-none text-ink-300 ${isEditable ? 'cursor-grab' : 'opacity-50'}`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-ink-900">{field.label}</div>
+                            <div className="truncate text-xs text-ink-400">{fieldTypeLabel(field.type)}</div>
+                          </div>
+                          <RequiredBadge
+                            required={field.required}
+                            disabled={!isEditable || saving}
+                            onToggle={() => onToggleRequired(field)}
+                          />
+                          <button
+                            type="button"
+                            className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-surface-muted disabled:cursor-default disabled:opacity-40"
+                            disabled={!isEditable}
+                            onClick={() => setFieldModal({ mode: 'edit', field })}
+                            aria-label={`Edit ${field.label}`}
+                          >
+                            <PencilLine size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-danger/10 hover:text-danger disabled:cursor-default disabled:opacity-40"
+                            disabled={!isEditable || referencedBy.length > 0}
+                            onClick={() => onDeleteField(field)}
+                            aria-label={`Delete ${field.label}`}
+                            title={
+                              referencedBy.length > 0
+                                ? `Referenced by ${referencedBy.join(', ')}'s visibility condition — remove that condition first`
+                                : undefined
+                            }
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
-                        <RequiredBadge
-                          required={field.required}
-                          disabled={!isEditable || saving}
-                          onToggle={() => onToggleRequired(field)}
-                        />
-                        <button
-                          type="button"
-                          className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-surface-muted disabled:cursor-default disabled:opacity-40"
-                          disabled={!isEditable}
-                          onClick={() => setFieldModal({ mode: 'edit', field })}
-                          aria-label={`Edit ${field.label}`}
-                        >
-                          <PencilLine size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-danger/10 hover:text-danger disabled:cursor-default disabled:opacity-40"
-                          disabled={!isEditable}
-                          onClick={() => onDeleteField(field)}
-                          aria-label={`Delete ${field.label}`}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 {saveError && <div className="mt-3 text-sm font-medium text-danger">{saveError}</div>}
               </div>
 
               <div className="flex justify-end gap-3 border-t border-line-soft px-5 py-4">
-                <Button variant="secondary" disabled={!isEditable || saving} onClick={() => persist(fields)}>
+                <Button
+                  variant="secondary"
+                  disabled={!isEditable || saving || publishing}
+                  onClick={() => persist(fields)}
+                >
                   {saving ? 'Saving…' : 'Save Draft'}
                 </Button>
-                <Button disabled title="Publishing is coming in a later release">
+                <Button
+                  disabled={!isEditable || saving || publishing || fields.length === 0}
+                  onClick={onPublish}
+                  title={fields.length === 0 ? 'Add at least one field before publishing' : undefined}
+                >
                   <Check size={16} />
-                  Publish
+                  {publishing ? 'Publishing…' : 'Publish'}
                 </Button>
               </div>
             </>
@@ -370,6 +450,9 @@ export default function FormBuilder() {
           mode={fieldModal.mode}
           initial={fieldModal.field}
           existingKeys={fields.map((f) => f.key)}
+          otherFields={fields
+            .filter((f) => f.key !== fieldModal.field?.key)
+            .map((f) => ({ key: f.key, label: f.label, type: f.type as FieldType }))}
           busy={saving}
           error={saveError}
           onClose={() => setFieldModal(null)}

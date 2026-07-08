@@ -75,3 +75,21 @@ export async function saveDraft(req: Request, res: Response, next: NextFunction)
     next(err);
   }
 }
+
+export async function publishDraft(req: Request, res: Response, next: NextFunction) {
+  try {
+    const dto = await formsService.publishDraft(req.user!.tenantId!, req.user!.id, req.params.key);
+    res.json(dto);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function startDraft(req: Request, res: Response, next: NextFunction) {
+  try {
+    const dto = await formsService.startFormDraft(req.user!.tenantId!, req.user!.id, req.params.key);
+    res.status(201).json(dto);
+  } catch (err) {
+    next(err);
+  }
+}

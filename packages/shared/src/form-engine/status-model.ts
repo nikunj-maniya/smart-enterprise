@@ -10,6 +10,13 @@ export const REQUESTER_ROLE = 'requester';
 /** Reserved for automated/system-triggered transitions — no human actor ever matches it. */
 export const SYSTEM_ROLE = 'system';
 
+/**
+ * State a generic custom-form request starts in when the form has no configured status model
+ * yet (status-model configuration is a later slice). Keeps just-published custom forms
+ * submittable as standard requests.
+ */
+export const DEFAULT_GENERIC_INITIAL_STATUS = 'Submitted';
+
 export const statusTransitionSchema = z.object({
   from: z.string(),
   to: z.string(),
