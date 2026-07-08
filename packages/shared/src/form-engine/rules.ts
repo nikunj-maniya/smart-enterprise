@@ -110,6 +110,13 @@ function evaluateLeaf(leaf: RuleLeaf, values: Record<string, unknown>): boolean 
   return false;
 }
 
+/** All field keys a rule (sub)tree references, across nested `and`/`or`. */
+export function collectRuleFields(node: RuleNode): string[] {
+  if ('and' in node) return node.and.flatMap(collectRuleFields);
+  if ('or' in node) return node.or.flatMap(collectRuleFields);
+  return [node.field];
+}
+
 function evaluateNode(node: RuleNode, values: Record<string, unknown>): boolean {
   if ('and' in node) return node.and.every((child) => evaluateNode(child, values));
   if ('or' in node) return node.or.some((child) => evaluateNode(child, values));

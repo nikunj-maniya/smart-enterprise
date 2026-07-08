@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { formFieldSchema } from './form-engine/index.js';
+import { collectRuleFields, formFieldSchema } from './form-engine/index.js';
 
 export * from './form-engine/index.js';
 
@@ -781,7 +781,16 @@ export const saveDraftFieldsRequestSchema = z.object({
     .array(formFieldSchema)
     .refine((fields) => new Set(fields.map((f) => f.key)).size === fields.length, {
       message: 'Field keys must be unique within a form',
-    }),
+    })
+    .refine(
+      (fields) => {
+        const keys = new Set(fields.map((f) => f.key));
+        return fields.every(
+          (f) => !f.visibilityRule || collectRuleFields(f.visibilityRule.when).every((k) => keys.has(k)),
+        );
+      },
+      { message: 'A visibility condition references a field that is not on this form' },
+    ),
 });
 export type SaveDraftFieldsRequest = z.infer<typeof saveDraftFieldsRequestSchema>;
 

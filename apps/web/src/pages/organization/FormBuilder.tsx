@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Check, FileText, GripVertical, PencilLine, Plus, Trash2 } from 'lucide-react';
+import { collectRuleFields, visibilityRuleSchema } from '@se/shared';
 import type {
   CreateFormDraftRequest,
   FieldType,
@@ -60,6 +61,18 @@ function RequiredBadge({
 
 function formattedDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** Labels of other fields whose visibility rule references `key` — deleting `key` would leave
+ * those rules with a dangling reference, so the caller should block the delete until they're gone. */
+function fieldsReferencing(fields: FormFieldDto[], key: string): string[] {
+  return fields
+    .filter((f) => f.key !== key)
+    .filter((f) => {
+      const parsed = visibilityRuleSchema.safeParse(f.visibilityRule);
+      return parsed.success && collectRuleFields(parsed.data.when).includes(key);
+    })
+    .map((f) => f.label);
 }
 
 /**
@@ -162,6 +175,13 @@ export default function FormBuilder() {
   }
 
   function onDeleteField(field: FormFieldDto) {
+    const referencedBy = fieldsReferencing(fields, field.key);
+    if (referencedBy.length > 0) {
+      setSaveError(
+        `Can't delete "${field.label}" — remove the visibility condition on ${referencedBy.join(', ')} first.`,
+      );
+      return;
+    }
     persist(fields.filter((f) => f.key !== field.key));
   }
 
@@ -181,7 +201,10 @@ export default function FormBuilder() {
     const exists = fields.some((f) => f.key === input.key);
     const next: FormFieldDto[] = exists
       ? fields.map((f) => (f.key === input.key ? { ...f, ...input } : f))
-      : [...fields, { ...input, options: input.options ?? null, validation: null, visibilityRule: null }];
+      : [
+          ...fields,
+          { ...input, options: input.options ?? null, validation: null, visibilityRule: input.visibilityRule ?? null },
+        ];
     const ok = await persist(next);
     if (ok) setFieldModal(null);
   }
@@ -301,51 +324,59 @@ export default function FormBuilder() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-[10px]">
-                    {fields.map((field, index) => (
-                      <div
-                        key={field.key}
-                        draggable={isEditable}
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', String(index));
-                          setDragIndex(index);
-                        }}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => onDrop(index)}
-                        className="flex items-center gap-3 rounded-[10px] border border-line-soft bg-app-bg px-[14px] py-3"
-                      >
-                        <GripVertical
-                          size={16}
-                          className={`flex-none text-ink-300 ${isEditable ? 'cursor-grab' : 'opacity-50'}`}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold text-ink-900">{field.label}</div>
-                          <div className="truncate text-xs text-ink-400">{fieldTypeLabel(field.type)}</div>
+                    {fields.map((field, index) => {
+                      const referencedBy = fieldsReferencing(fields, field.key);
+                      return (
+                        <div
+                          key={field.key}
+                          draggable={isEditable}
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', String(index));
+                            setDragIndex(index);
+                          }}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => onDrop(index)}
+                          className="flex items-center gap-3 rounded-[10px] border border-line-soft bg-app-bg px-[14px] py-3"
+                        >
+                          <GripVertical
+                            size={16}
+                            className={`flex-none text-ink-300 ${isEditable ? 'cursor-grab' : 'opacity-50'}`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-ink-900">{field.label}</div>
+                            <div className="truncate text-xs text-ink-400">{fieldTypeLabel(field.type)}</div>
+                          </div>
+                          <RequiredBadge
+                            required={field.required}
+                            disabled={!isEditable || saving}
+                            onToggle={() => onToggleRequired(field)}
+                          />
+                          <button
+                            type="button"
+                            className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-surface-muted disabled:cursor-default disabled:opacity-40"
+                            disabled={!isEditable}
+                            onClick={() => setFieldModal({ mode: 'edit', field })}
+                            aria-label={`Edit ${field.label}`}
+                          >
+                            <PencilLine size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-danger/10 hover:text-danger disabled:cursor-default disabled:opacity-40"
+                            disabled={!isEditable || referencedBy.length > 0}
+                            onClick={() => onDeleteField(field)}
+                            aria-label={`Delete ${field.label}`}
+                            title={
+                              referencedBy.length > 0
+                                ? `Referenced by ${referencedBy.join(', ')}'s visibility condition — remove that condition first`
+                                : undefined
+                            }
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
-                        <RequiredBadge
-                          required={field.required}
-                          disabled={!isEditable || saving}
-                          onToggle={() => onToggleRequired(field)}
-                        />
-                        <button
-                          type="button"
-                          className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-surface-muted disabled:cursor-default disabled:opacity-40"
-                          disabled={!isEditable}
-                          onClick={() => setFieldModal({ mode: 'edit', field })}
-                          aria-label={`Edit ${field.label}`}
-                        >
-                          <PencilLine size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-danger/10 hover:text-danger disabled:cursor-default disabled:opacity-40"
-                          disabled={!isEditable}
-                          onClick={() => onDeleteField(field)}
-                          aria-label={`Delete ${field.label}`}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 {saveError && <div className="mt-3 text-sm font-medium text-danger">{saveError}</div>}
@@ -370,6 +401,9 @@ export default function FormBuilder() {
           mode={fieldModal.mode}
           initial={fieldModal.field}
           existingKeys={fields.map((f) => f.key)}
+          otherFields={fields
+            .filter((f) => f.key !== fieldModal.field?.key)
+            .map((f) => ({ key: f.key, label: f.label, type: f.type as FieldType }))}
           busy={saving}
           error={saveError}
           onClose={() => setFieldModal(null)}
