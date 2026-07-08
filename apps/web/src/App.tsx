@@ -22,6 +22,7 @@ import Departments from '@/pages/organization/Departments';
 import Roles from '@/pages/organization/Roles';
 import Projects from '@/pages/organization/Projects';
 import CompanyDetails from '@/pages/organization/CompanyDetails';
+import FormBuilder from '@/pages/organization/FormBuilder';
 import { useAuth } from '@/lib/auth';
 
 /** Landing routes each persona to their home. Employee request screens land in a later change. */
@@ -123,6 +124,14 @@ export default function App() {
           element={
             <RequireRole role={SystemRoleKey.EnterpriseAdmin}>
               <CompanyDetails />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/organization/form-builder"
+          element={
+            <RequireRole role={SystemRoleKey.EnterpriseAdmin}>
+              <FormBuilder />
             </RequireRole>
           }
         />

@@ -258,13 +258,15 @@ model LeaveBalance {
 
 // ── Form engine (metadata) ─────────────────────────────────
 model FormDefinition {
-  id       String       @id @default(cuid())
-  tenantId String
-  key      String
-  title    String
-  version  Int          @default(1)
-  renderer FormRenderer @default(core)
-  status   FormStatus   @default(draft)
+  id        String       @id @default(cuid())
+  tenantId  String
+  key       String
+  title     String
+  version   Int          @default(1)
+  renderer  FormRenderer @default(core)
+  status    FormStatus   @default(draft)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   tenant           Tenant            @relation(fields: [tenantId], references: [id])
   sections         FormSection[]

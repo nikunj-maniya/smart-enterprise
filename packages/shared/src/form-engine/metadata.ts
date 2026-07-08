@@ -73,7 +73,7 @@ export type FieldValidation = z.infer<typeof fieldValidationSchema>;
 
 export const formFieldSchema = z.object({
   key: z.string().min(1),
-  label: z.string(),
+  label: z.string().min(1, 'Label is required'),
   helpText: z.string().optional(),
   type: fieldTypeSchema,
   required: z.boolean().default(false),
