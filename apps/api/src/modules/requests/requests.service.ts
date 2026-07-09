@@ -158,14 +158,25 @@ export async function listApprovalQueue(
     request: { tenantId },
     ...(roleContext ? { roleContext } : {}),
   };
+  // All of a request's approvers are snapshotted together in one batch at submission, as a
+  // single flat, parallel group — there's no later stage that repopulates them. So once the
+  // request has transitioned even once since then (Approved/Rejected reconcile decision via
+  // `recordApproverDecision`; anything else — Withdrawn, a pre-approval Cancel, etc. — does
+  // not, since there's no real decision to attribute to approvers who never acted), any row
+  // still `decision: 'pending'` is stale: nothing this approver does can matter anymore. A
+  // request that has never transitioned has exactly one `RequestStatusHistory` row, written at
+  // creation with `fromState: null`; every transition afterwards writes a non-null `fromState`.
+  const stillAwaitable: Prisma.RequestApproverWhereInput = {
+    request: { statusHistory: { none: { fromState: { not: null } } } },
+  };
 
   const [awaitingCount, decidedCount, myRows] = await Promise.all([
-    prisma.requestApprover.count({ where: { ...baseWhere, decision: 'pending' } }),
+    prisma.requestApprover.count({ where: { ...baseWhere, decision: 'pending', ...stillAwaitable } }),
     prisma.requestApprover.count({ where: { ...baseWhere, NOT: { decision: 'pending' } } }),
     prisma.requestApprover.findMany({
       where: {
         ...baseWhere,
-        ...(tab === 'pending' ? { decision: 'pending' } : { NOT: { decision: 'pending' } }),
+        ...(tab === 'pending' ? { decision: 'pending', ...stillAwaitable } : { NOT: { decision: 'pending' } }),
       },
       include: {
         request: {
