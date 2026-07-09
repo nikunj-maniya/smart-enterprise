@@ -10,6 +10,7 @@ import {
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 import { requiresBalanceRestore, restoreBalanceOnCancel } from './extractors.js';
+import * as notificationsService from '../notifications/notifications.service.js';
 
 /** The authenticated caller attempting a transition. */
 export interface TransitionActor {
@@ -22,9 +23,88 @@ type RequestWithForm = Prisma.RequestGetPayload<{
 }>;
 
 /**
+ * Notify the requester of a status change, inside the transition's transaction. Skipped when
+ * the requester is the one performing the transition (e.g. withdraw/cancel) — no need to notify
+ * yourself of your own action. `Approved`/`Rejected` map to the approval-outcome notifications
+ * (naming the actor, or a rejection reason); every other transition (approver-, admin-, or
+ * system-triggered) is a generic status change.
+ */
+async function notifyRequesterOfTransition(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  request: RequestWithForm,
+  transition: StatusTransition,
+  actorId: string | null,
+  note: string | undefined,
+): Promise<void> {
+  if (actorId === request.requesterId) return;
+
+  const basePayload = { requestId: request.id, formKey: request.form.key, formTitle: request.form.title };
+
+  if (transition.to === 'Approved' || transition.to === 'Rejected') {
+    const actor = actorId ? await tx.user.findUnique({ where: { id: actorId }, select: { name: true } }) : null;
+    const approverName = actor?.name ?? 'An approver';
+    if (transition.to === 'Approved') {
+      await notificationsService.notify(tx, tenantId, request.requesterId, {
+        type: 'request_approved',
+        payload: { ...basePayload, approverName },
+      });
+    } else {
+      await notificationsService.notify(tx, tenantId, request.requesterId, {
+        type: 'request_rejected',
+        payload: { ...basePayload, approverName, reason: note ?? null },
+      });
+    }
+  } else {
+    await notificationsService.notify(tx, tenantId, request.requesterId, {
+      type: 'request_status_changed',
+      payload: { ...basePayload, toState: transition.to },
+    });
+  }
+}
+
+/**
+ * When a human actor drives a request to a terminal decision state (`Approved`/`Rejected`),
+ * record that decision on the actor's own snapshotted `RequestApprover` row(s) — keyed by
+ * `(requestId, approverId=actorId)`, since `resolveApprovers` can snapshot the same user under
+ * more than one `roleContext`. This is what the approvals queue's "Decided" tab, chain badges,
+ * and `MyRequests`/`ApprovalQueue` decision counts read; the whole-request `status` above only
+ * tracks the single transition that actually moved the request, not each approver's own call.
+ *
+ * Approval stages resolved by `resolveApprovers` are OR-gated in parallel (the status model
+ * itself only declares one `Approved`/`Rejected` transition shared across all of a stage's
+ * roles, so whichever snapshotted approver acts first is the one who resolves the whole
+ * request). Once that happens, every *other* still-`pending` approver snapshotted on this
+ * request is no longer awaiting a decision — nothing they do can change an already-decided
+ * request (the status model has no transition out of `Approved`/`Rejected` for their role) —
+ * so their rows are reconciled to the same outcome here too. They get no `comment`: the note
+ * belongs to the actor who actually decided, not to approvers who never acted, so their own
+ * "your reason" never renders. Without this, `listApprovalQueue`'s pending tab and
+ * `listMyRequests`' approver-progress count would stay stuck on the now-stale snapshot forever.
+ */
+async function recordApproverDecision(
+  tx: Prisma.TransactionClient,
+  requestId: string,
+  actorId: string,
+  decision: 'approved' | 'rejected',
+  note: string | undefined,
+): Promise<void> {
+  const decidedAt = new Date();
+  await tx.requestApprover.updateMany({
+    where: { requestId, approverId: actorId },
+    data: { decision, decidedAt, comment: decision === 'rejected' ? note ?? null : null },
+  });
+  await tx.requestApprover.updateMany({
+    where: { requestId, decision: 'pending', NOT: { approverId: actorId } },
+    data: { decision, decidedAt },
+  });
+}
+
+/**
  * Shared transaction body for both human- and system-triggered transitions: optimistic-lock
- * status update, `RequestStatusHistory` append, audit log, and (on `Approved -> Cancelled`
- * for balance-bearing forms) the balance-restore hook. `actorId` is `null` for the system actor.
+ * status update, `RequestStatusHistory` append, audit log, requester notification, and (on
+ * `Approved -> Cancelled` for balance-bearing forms) the balance-restore hook. `actorId` is
+ * `null` for the system actor.
  */
 async function applyTransition(
   tenantId: string,
@@ -62,6 +142,9 @@ async function applyTransition(
         after: { status: transition.to },
       },
     });
+    if (actorId && (transition.to === 'Approved' || transition.to === 'Rejected')) {
+      await recordApproverDecision(tx, request.id, actorId, transition.to === 'Approved' ? 'approved' : 'rejected', note);
+    }
     if (transition.from === 'Approved' && transition.to === 'Cancelled' && requiresBalanceRestore(request.form.key)) {
       await restoreBalanceOnCancel(tx, {
         tenantId,
@@ -72,6 +155,7 @@ async function applyTransition(
         halfDayCount: request.halfDayCount,
       });
     }
+    await notifyRequesterOfTransition(tx, tenantId, request, transition, actorId, note);
     return tx.request.findUniqueOrThrow({ where: { id: request.id } });
   });
 

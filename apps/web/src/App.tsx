@@ -1,6 +1,5 @@
-import { Routes, Route, Navigate, Link } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { SystemRoleKey } from '@se/shared';
-import { PageHeader } from '@/components/shell/PageHeader';
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
 import ChangePassword from '@/pages/ChangePassword';
@@ -25,39 +24,18 @@ import CompanyDetails from '@/pages/organization/CompanyDetails';
 import FormBuilder from '@/pages/organization/FormBuilder';
 import NewRequest from '@/pages/requests/NewRequest';
 import RequestForm from '@/pages/requests/RequestForm';
-import { Button } from '@/components/ui/button';
+import MyRequests from '@/pages/requests/MyRequests';
+import ApprovalsQueue from '@/pages/requests/ApprovalsQueue';
 import { useAuth } from '@/lib/auth';
 
-/** Landing routes each persona to their home. Employee request screens land in a later change. */
+/** Landing routes each persona to their home: System Admin → platform overview, Enterprise Admin → org users, everyone else → My Requests. */
 function Home() {
   const { user } = useAuth();
   if (user?.isSystemAdmin) return <Overview />;
   if (user?.roles.includes(SystemRoleKey.EnterpriseAdmin)) {
     return <Navigate to="/organization/users" replace />;
   }
-  return <MemberHome />;
-}
-
-/** Employee home: a request workspace entry point (My Requests list arrives in a later change). */
-function MemberHome() {
-  const { user } = useAuth();
-  return (
-    <>
-      <PageHeader
-        title={`Welcome, ${user?.name?.split(' ')[0] ?? ''}`.trim()}
-        subtitle="Submit a request and track its progress."
-        breadcrumb={user?.tenantName ?? 'Workspace'}
-      />
-      <div className="mt-6 rounded-lg border border-dashed border-line bg-surface p-12 text-center">
-        <div className="text-sm text-ink-400">Ready to get started?</div>
-        <div className="mt-4 flex justify-center">
-          <Button asChild>
-            <Link to="/requests/new">Start a new request</Link>
-          </Button>
-        </div>
-      </div>
-    </>
-  );
+  return <Navigate to="/requests" replace />;
 }
 
 export default function App() {
@@ -90,6 +68,9 @@ export default function App() {
         <Route path="/audit" element={<AuditLog />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/requests" element={<MyRequests />} />
+        <Route path="/requests/mine" element={<MyRequests />} />
+        <Route path="/requests/approvals" element={<ApprovalsQueue />} />
         <Route path="/requests/new" element={<NewRequest />} />
         <Route path="/requests/new/:key" element={<RequestForm />} />
         <Route

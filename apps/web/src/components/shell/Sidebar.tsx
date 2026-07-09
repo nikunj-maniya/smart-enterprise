@@ -2,6 +2,8 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutGrid,
   ClipboardCheck,
+  ClipboardList,
+  ListChecks,
   Building2,
   Building,
   Users,
@@ -17,6 +19,12 @@ import { SystemRoleKey } from '@se/shared';
 import { useAuth } from '@/lib/auth';
 import { useRegistrationsCount } from '@/lib/registrationsCount';
 import { cn } from '@/lib/utils';
+
+/** Every authenticated user submits/tracks requests and may be routed approvals, regardless of role. */
+const requestsNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
+  { to: '/requests', label: 'My Requests', icon: ClipboardList, end: true },
+  { to: '/requests/approvals', label: 'Approvals', icon: ListChecks },
+];
 
 const platformNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: '/', label: 'Overview', icon: LayoutGrid, end: true },
@@ -116,6 +124,15 @@ export function Sidebar() {
           Smart<span className="font-medium text-[#9fe9e9]"> Enterprise</span>
         </span>
       </div>
+
+      {/* Requests — every tenant user (not the platform-level System Admin) */}
+      {!user?.isSystemAdmin && (
+        <div className="flex flex-col gap-[3px]">
+          {requestsNav.map((item) => (
+            <SidebarLink key={item.to} {...item} />
+          ))}
+        </div>
+      )}
 
       {/* Platform section — System Admin only */}
       {user?.isSystemAdmin && (

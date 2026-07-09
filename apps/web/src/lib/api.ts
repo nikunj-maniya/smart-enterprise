@@ -1,9 +1,13 @@
 import type {
+  ApprovalQueueResponse,
+  ApprovalQueueTab,
   DirectoryProjectsResponse,
   DirectoryUsersResponse,
   FormDefinitionDto,
   FormDefinitionSummaryDto,
+  MyRequestsResponse,
   RequestDto,
+  TransitionRequestInput,
 } from '@se/shared';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
@@ -92,5 +96,29 @@ export function submitRequest(formKey: string, payload: Record<string, unknown>)
   return apiFetch<RequestDto>('/requests', {
     method: 'POST',
     body: JSON.stringify({ formKey, payload }),
+  });
+}
+
+/** `GET /requests` — the caller's own submitted requests (My Requests), newest first. */
+export function listMyRequests(query: { page?: number; pageSize?: number; status?: string } = {}) {
+  const params = new URLSearchParams();
+  if (query.page) params.set('page', String(query.page));
+  if (query.pageSize) params.set('pageSize', String(query.pageSize));
+  if (query.status) params.set('status', query.status);
+  return apiFetch<MyRequestsResponse>(`/requests?${params.toString()}`);
+}
+
+/** `GET /requests/approvals` — the caller's approver queue, tabbed by their own decision. */
+export function listApprovalQueue(query: { tab: ApprovalQueueTab; roleContext?: string }) {
+  const params = new URLSearchParams({ tab: query.tab });
+  if (query.roleContext) params.set('roleContext', query.roleContext);
+  return apiFetch<ApprovalQueueResponse>(`/requests/approvals?${params.toString()}`);
+}
+
+/** `POST /requests/:id/transitions` — move a request along a status-model transition (approve, reject, withdraw, …). */
+export function transitionRequest(requestId: string, body: TransitionRequestInput) {
+  return apiFetch<RequestDto>(`/requests/${requestId}/transitions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }

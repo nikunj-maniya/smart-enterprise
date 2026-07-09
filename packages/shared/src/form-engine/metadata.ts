@@ -102,6 +102,26 @@ export const formDefinitionSchema = z.object({
 });
 export type FormDefinition = z.infer<typeof formDefinitionSchema>;
 
+// ── Approval routing (mirrors `ApprovalWorkflow.stageRules`) — PRD §6/§9 ──
+// A `StageRules.approvers` entry names where one parallel-stage approver comes
+// from; the request-creation snapshot resolves each rule against the submitted
+// payload into `RequestApprover` rows. Only the `field` source (a user-picker
+// field's submitted value(s)) is implemented today — role-based routing is a
+// later slice (design.md).
+export const approverRuleSchema = z.object({
+  source: z.literal('field'),
+  /** The user-picker field whose submitted value(s) resolve to approver user id(s). */
+  field: z.string().min(1),
+  /** Optional gate: this stage only applies when the rule matches the submitted payload. */
+  when: visibilityRuleSchema.optional(),
+});
+export type ApproverRule = z.infer<typeof approverRuleSchema>;
+
+export const stageRulesSchema = z.object({
+  approvers: z.array(approverRuleSchema),
+});
+export type StageRules = z.infer<typeof stageRulesSchema>;
+
 /** Field types that render as disabled stubs until Phase 4 object storage lands. */
 const STUB_FIELD_TYPES: ReadonlySet<FieldType> = new Set(['signature', 'file-upload']);
 /** Layout-only field types that carry no payload value. */

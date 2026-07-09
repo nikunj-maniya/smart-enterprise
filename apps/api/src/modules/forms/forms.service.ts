@@ -125,12 +125,26 @@ function toFormDefinition(def: DefinitionWithGraph): FormDefinition {
 export async function getPublishedDefinitionForSubmission(
   tenantId: string,
   key: string,
-): Promise<{ id: string; version: number; definition: FormDefinition; initialStatus: string }> {
+): Promise<{
+  id: string;
+  version: number;
+  definition: FormDefinition;
+  initialStatus: string;
+  approvalWorkflow: { mode: string; stageRules: unknown } | null;
+}> {
   const def = await findPublished(tenantId, key);
   const states = def.statusModel?.states;
   const initialStatus =
     Array.isArray(states) && typeof states[0] === 'string' ? states[0] : DEFAULT_GENERIC_INITIAL_STATUS;
-  return { id: def.id, version: def.version, definition: toFormDefinition(def), initialStatus };
+  return {
+    id: def.id,
+    version: def.version,
+    definition: toFormDefinition(def),
+    initialStatus,
+    approvalWorkflow: def.approvalWorkflow
+      ? { mode: def.approvalWorkflow.mode, stageRules: def.approvalWorkflow.stageRules }
+      : null,
+  };
 }
 
 /** Version lookup + row-set insert + audit log, run against one client (own tx or a caller's). */

@@ -354,6 +354,7 @@ model Request {
 
   @@index([tenantId])
   @@index([startDate, endDate])
+  @@index([requesterId])
 }
 
 model RequestApprover {
@@ -366,6 +367,8 @@ model RequestApprover {
   comment     String?
 
   request Request @relation(fields: [requestId], references: [id])
+
+  @@index([approverId, decision])
 }
 
 model RequestStatusHistory {

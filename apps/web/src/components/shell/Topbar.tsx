@@ -1,6 +1,22 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Bell, ClipboardCheck, ChevronDown, UserRound, LogOut } from 'lucide-react';
+import {
+  Search,
+  Bell,
+  ClipboardCheck,
+  CheckCircle,
+  XCircle,
+  FileText,
+  Plane,
+  Home,
+  Monitor,
+  UserCheck,
+  RefreshCw,
+  Clock,
+  ChevronDown,
+  UserRound,
+  LogOut,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { NotificationDto } from '@se/shared';
 import { useAuth } from '@/lib/auth';
@@ -8,16 +24,60 @@ import { apiFetch } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/formatRelativeTime';
 import { SearchOverlay } from './SearchOverlay';
 
-const NOTIF_STYLE: Record<
-  NotificationDto['type'],
-  { icon: LucideIcon; title: (payload: NotificationDto['payload']) => string; to: string }
-> = {
-  enterprise_registered: {
-    icon: ClipboardCheck,
-    title: (payload) => `New enterprise registration — ${payload.companyName}`,
-    to: '/registrations',
-  },
+/** Core form-type icon, per the design (custom/unrecognized forms fall back to a generic doc icon). */
+const FORM_KEY_ICON: Record<string, LucideIcon> = {
+  leave: Plane,
+  wfh: Home,
+  it: Monitor,
+  visitor: UserCheck,
 };
+
+/**
+ * Per-type icon/title/target — a `switch` (not a lookup map) so each case narrows `n.payload`
+ * to that notification's own variant. Request-event notifications deep-link to the requester's
+ * My Requests list or the approver's Approvals Queue (with the request id as a query param so
+ * either page can open the matching detail view/card), scoped to the requester/approver roles.
+ */
+function notifStyle(n: NotificationDto): { icon: LucideIcon; title: string; to: string } {
+  switch (n.type) {
+    case 'enterprise_registered':
+      return {
+        icon: ClipboardCheck,
+        title: `New enterprise registration — ${n.payload.companyName}`,
+        to: '/registrations',
+      };
+    case 'request_approved':
+      return {
+        icon: CheckCircle,
+        title: `${n.payload.approverName} approved your ${n.payload.formTitle} request`,
+        to: `/requests?requestId=${n.payload.requestId}`,
+      };
+    case 'request_rejected':
+      return {
+        icon: XCircle,
+        title: `${n.payload.approverName} rejected your ${n.payload.formTitle} request`,
+        to: `/requests?requestId=${n.payload.requestId}`,
+      };
+    case 'request_needs_approval':
+      return {
+        icon: FORM_KEY_ICON[n.payload.formKey] ?? FileText,
+        title: `New ${n.payload.formTitle} request from ${n.payload.requesterName} needs your approval`,
+        to: `/requests/approvals?requestId=${n.payload.requestId}`,
+      };
+    case 'request_status_changed':
+      return {
+        icon: RefreshCw,
+        title: `Your ${n.payload.formTitle} request moved to ${n.payload.toState}`,
+        to: `/requests?requestId=${n.payload.requestId}`,
+      };
+    case 'approval_reminder':
+      return {
+        icon: Clock,
+        title: `${n.payload.pendingCount} requests are awaiting your decision`,
+        to: '/requests/approvals',
+      };
+  }
+}
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -63,19 +123,22 @@ function NotificationsMenu() {
       setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
       apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }).catch(() => {});
     }
-    navigate(NOTIF_STYLE[n.type].to);
+    navigate(notifStyle(n).to);
   }
 
   return (
     <div className="relative">
       <button
         className="relative flex text-ink-500 hover:text-ink-700"
-        aria-label="Notifications"
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
         onClick={() => setOpen((v) => !v)}
       >
         <Bell size={21} />
         {unreadCount > 0 && (
-          <span className="absolute -right-[5px] -top-[5px] flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-bold text-white">
+          <span
+            aria-hidden="true"
+            className="absolute -right-[5px] -top-[5px] flex h-4 min-w-[16px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-bold text-white"
+          >
             {unreadCount}
           </span>
         )}
@@ -86,20 +149,22 @@ function NotificationsMenu() {
           <div className="absolute right-0 top-9 z-[41] w-[344px] overflow-hidden rounded-xl border border-line-soft bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b border-line-soft px-[18px] py-[14px]">
               <span className="text-sm font-bold">Notifications</span>
-              <span
-                className="cursor-pointer text-xs font-semibold text-brand-hover"
+              <button
+                type="button"
+                className="text-xs font-semibold text-brand-hover"
                 onClick={markAllRead}
               >
                 Mark all read
-              </span>
+              </button>
             </div>
             {notifications.map((n) => {
-              const style = NOTIF_STYLE[n.type];
+              const style = notifStyle(n);
               const Icon = style.icon;
               return (
-                <div
+                <button
                   key={n.id}
-                  className="flex cursor-pointer gap-3 border-b border-line-soft px-[18px] py-[13px] last:border-b-0"
+                  type="button"
+                  className="flex w-full gap-3 border-b border-line-soft px-[18px] py-[13px] text-left last:border-b-0"
                   style={{ background: n.read ? 'var(--surface)' : 'rgb(240,248,248)' }}
                   onClick={() => handleSelect(n)}
                 >
@@ -110,15 +175,13 @@ function NotificationsMenu() {
                     <Icon size={16} className="text-brand" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13px] leading-[1.4] text-ink-700">
-                      {style.title(n.payload)}
-                    </div>
+                    <div className="text-[13px] leading-[1.4] text-ink-700">{style.title}</div>
                     <div className="mt-[2px] text-[11.5px] text-ink-400">
                       {formatRelativeTime(n.createdAt)}
                     </div>
                   </div>
                   {!n.read && <span className="mt-[5px] h-2 w-2 flex-none rounded-full bg-brand" />}
-                </div>
+                </button>
               );
             })}
             {notifications.length === 0 && (
