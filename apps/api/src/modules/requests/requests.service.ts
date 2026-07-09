@@ -1,8 +1,21 @@
 import type { Prisma } from '@prisma/client';
-import { validatePayload, type CreateRequestInput, type RequestDto } from '@se/shared';
+import {
+  stageRulesSchema,
+  validatePayload,
+  type ApprovalDecision,
+  type ApprovalQueueItemDto,
+  type ApprovalQueueQuery,
+  type ApprovalQueueResponse,
+  type CreateRequestInput,
+  type MyRequestsQuery,
+  type MyRequestsResponse,
+  type RequestDto,
+} from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 import * as formsService from '../forms/forms.service.js';
+import * as notificationsService from '../notifications/notifications.service.js';
+import { resolveApprovers } from './approver-resolution.js';
 import { extractPromotedColumns } from './extractors.js';
 
 /**
@@ -26,6 +39,9 @@ export async function createRequest(
   }
 
   const promoted = extractPromotedColumns(input.formKey, result.data!);
+  const stageRules = form.approvalWorkflow ? stageRulesSchema.parse(form.approvalWorkflow.stageRules) : null;
+  const approvers = resolveApprovers(form.definition, stageRules, result.data!);
+  const requester = await prisma.user.findUniqueOrThrow({ where: { id: requesterId }, select: { name: true } });
 
   const created = await prisma.$transaction(async (tx) => {
     const request = await tx.request.create({
@@ -39,6 +55,16 @@ export async function createRequest(
         ...promoted,
       },
     });
+    if (approvers.length > 0) {
+      await tx.requestApprover.createMany({
+        data: approvers.map((a) => ({
+          requestId: request.id,
+          approverId: a.approverId,
+          roleContext: a.roleContext,
+          decision: 'pending',
+        })),
+      });
+    }
     await tx.requestStatusHistory.create({
       data: { requestId: request.id, fromState: null, toState: form.initialStatus, actorId: requesterId },
     });
@@ -52,6 +78,16 @@ export async function createRequest(
         after: { formKey: input.formKey, status: form.initialStatus },
       },
     });
+    const approverIds = [...new Set(approvers.map((a) => a.approverId))];
+    await notificationsService.notifyMany(tx, tenantId, approverIds, {
+      type: 'request_needs_approval',
+      payload: {
+        requestId: request.id,
+        formKey: input.formKey,
+        formTitle: form.definition.title,
+        requesterName: requester.name,
+      },
+    });
     return request;
   });
 
@@ -61,4 +97,122 @@ export async function createRequest(
     status: created.status,
     createdAt: created.createdAt.toISOString(),
   };
+}
+
+/** A nullable decision column always written as 'pending'/'approved'/'rejected'; never left null by this codebase. */
+function toDecision(decision: string | null): ApprovalDecision {
+  return (decision ?? 'pending') as ApprovalDecision;
+}
+
+/** GET /requests — the caller's own requests, newest first, optionally filtered by status. */
+export async function listMyRequests(
+  tenantId: string,
+  requesterId: string,
+  query: MyRequestsQuery,
+): Promise<MyRequestsResponse> {
+  const { page, pageSize, status } = query;
+  const where: Prisma.RequestWhereInput = {
+    tenantId,
+    requesterId,
+    ...(status ? { status } : {}),
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.request.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: { form: { select: { key: true, title: true } }, approvers: { select: { decision: true } } },
+    }),
+    prisma.request.count({ where }),
+  ]);
+
+  return {
+    rows: rows.map((r) => ({
+      id: r.id,
+      formKey: r.form.key,
+      formTitle: r.form.title,
+      status: r.status,
+      createdAt: r.createdAt.toISOString(),
+      startDate: r.startDate?.toISOString() ?? null,
+      endDate: r.endDate?.toISOString() ?? null,
+      approversTotal: r.approvers.length,
+      approversDecided: r.approvers.filter((a) => toDecision(a.decision) !== 'pending').length,
+    })),
+    total,
+    page,
+    pageSize,
+  };
+}
+
+/** GET /requests/approvals — requests where the caller is a snapshotted approver, tabbed by their own decision. */
+export async function listApprovalQueue(
+  tenantId: string,
+  approverId: string,
+  query: ApprovalQueueQuery,
+): Promise<ApprovalQueueResponse> {
+  const { tab, roleContext } = query;
+  const baseWhere: Prisma.RequestApproverWhereInput = {
+    approverId,
+    request: { tenantId },
+    ...(roleContext ? { roleContext } : {}),
+  };
+
+  const [awaitingCount, decidedCount, myRows] = await Promise.all([
+    prisma.requestApprover.count({ where: { ...baseWhere, decision: 'pending' } }),
+    prisma.requestApprover.count({ where: { ...baseWhere, NOT: { decision: 'pending' } } }),
+    prisma.requestApprover.findMany({
+      where: {
+        ...baseWhere,
+        ...(tab === 'pending' ? { decision: 'pending' } : { NOT: { decision: 'pending' } }),
+      },
+      include: {
+        request: {
+          include: {
+            form: { select: { key: true, title: true } },
+            requester: { select: { id: true, name: true, jobTitle: true } },
+            approvers: true,
+          },
+        },
+      },
+      orderBy: { request: { createdAt: 'desc' } },
+    }),
+  ]);
+
+  const chainApproverIds = new Set<string>();
+  for (const row of myRows) {
+    for (const a of row.request.approvers) chainApproverIds.add(a.approverId);
+  }
+  const approverUsers = await prisma.user.findMany({
+    where: { id: { in: [...chainApproverIds] } },
+    select: { id: true, name: true },
+  });
+  const nameByApproverId = new Map(approverUsers.map((u) => [u.id, u.name]));
+
+  const rows: ApprovalQueueItemDto[] = myRows.map((row) => {
+    const req = row.request;
+    return {
+      requestId: req.id,
+      formKey: req.form.key,
+      formTitle: req.form.title,
+      requesterId: req.requester.id,
+      requesterName: req.requester.name,
+      requesterJobTitle: req.requester.jobTitle,
+      startDate: req.startDate?.toISOString() ?? null,
+      endDate: req.endDate?.toISOString() ?? null,
+      submittedAt: req.createdAt.toISOString(),
+      status: req.status,
+      myDecision: toDecision(row.decision),
+      chain: req.approvers.map((a) => ({
+        approverId: a.approverId,
+        approverName: nameByApproverId.get(a.approverId) ?? 'Unknown',
+        roleContext: a.roleContext,
+        decision: toDecision(a.decision),
+        comment: a.comment ?? null,
+      })),
+    };
+  });
+
+  return { rows, awaitingCount, decidedCount };
 }

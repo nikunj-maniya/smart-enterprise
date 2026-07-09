@@ -321,13 +321,62 @@ export const overviewResponseSchema = z.object({
 export type OverviewResponse = z.infer<typeof overviewResponseSchema>;
 
 // ── Notifications ─────────────────────────────────────────────
-export const notificationSchema = z.object({
-  id: z.string(),
-  type: z.literal('enterprise_registered'),
-  payload: z.object({ registrationId: z.string(), companyName: z.string() }),
-  read: z.boolean(),
-  createdAt: z.string(),
+/** Fields every request-event notification's payload carries, identifying the request it's about. */
+const requestNotificationPayloadSchema = z.object({
+  requestId: z.string(),
+  formKey: z.string(),
+  formTitle: z.string(),
 });
+
+export const notificationSchema = z.discriminatedUnion('type', [
+  z.object({
+    id: z.string(),
+    type: z.literal('enterprise_registered'),
+    payload: z.object({ registrationId: z.string(), companyName: z.string() }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+  /** To the requester — an approver in the chain approved their request. */
+  z.object({
+    id: z.string(),
+    type: z.literal('request_approved'),
+    payload: requestNotificationPayloadSchema.extend({ approverName: z.string() }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+  /** To the requester — an approver rejected their request. */
+  z.object({
+    id: z.string(),
+    type: z.literal('request_rejected'),
+    payload: requestNotificationPayloadSchema.extend({ approverName: z.string(), reason: z.string().nullable() }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+  /** To an approver — a new request was routed to them. */
+  z.object({
+    id: z.string(),
+    type: z.literal('request_needs_approval'),
+    payload: requestNotificationPayloadSchema.extend({ requesterName: z.string() }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+  /** To the requester — their request's status changed outside the approve/reject flow (e.g. IT fulfilment). */
+  z.object({
+    id: z.string(),
+    type: z.literal('request_status_changed'),
+    payload: requestNotificationPayloadSchema.extend({ toState: z.string() }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+  /** To an approver — a digest of requests still awaiting their decision. */
+  z.object({
+    id: z.string(),
+    type: z.literal('approval_reminder'),
+    payload: z.object({ pendingCount: z.number().int() }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+]);
 export type NotificationDto = z.infer<typeof notificationSchema>;
 
 // ── Enterprises (onboarded tenants) ─────────────────────────────
@@ -815,6 +864,86 @@ export const transitionRequestSchema = z.object({
   note: z.string().optional(),
 });
 export type TransitionRequestInput = z.infer<typeof transitionRequestSchema>;
+
+/** A `RequestApprover.decision`: `pending` until the approver acts. */
+export const approvalDecisionSchema = z.enum(['pending', 'approved', 'rejected']);
+export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
+
+// ── My Requests (form-engine, tenant-scoped) — the requester's own request list ──
+export const myRequestsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.string().optional(),
+});
+export type MyRequestsQuery = z.infer<typeof myRequestsQuerySchema>;
+
+/** One row of the requester's own request list. */
+export const requestListItemSchema = z.object({
+  id: z.string(),
+  formKey: z.string(),
+  formTitle: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  startDate: z.string().nullable(),
+  endDate: z.string().nullable(),
+  approversTotal: z.number().int(),
+  approversDecided: z.number().int(),
+});
+export type RequestListItemDto = z.infer<typeof requestListItemSchema>;
+
+export const myRequestsResponseSchema = z.object({
+  rows: z.array(requestListItemSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type MyRequestsResponse = z.infer<typeof myRequestsResponseSchema>;
+
+// ── Approvals Queue (approval-workflow, tenant-scoped) — an approver's own queue ──
+export const approvalQueueTabSchema = z.enum(['pending', 'decided']);
+export type ApprovalQueueTab = z.infer<typeof approvalQueueTabSchema>;
+
+export const approvalQueueQuerySchema = z.object({
+  tab: approvalQueueTabSchema.default('pending'),
+  /** Filters to one of the caller's own approver roles, when they hold more than one (design.md "Approving as"). */
+  roleContext: z.string().optional(),
+});
+export type ApprovalQueueQuery = z.infer<typeof approvalQueueQuerySchema>;
+
+/** One entry of a request's approval chain, as shown alongside a queue card. */
+export const approvalChainEntrySchema = z.object({
+  approverId: z.string(),
+  approverName: z.string(),
+  roleContext: z.string(),
+  decision: approvalDecisionSchema,
+  comment: z.string().nullable(),
+});
+export type ApprovalChainEntryDto = z.infer<typeof approvalChainEntrySchema>;
+
+/** One card on the Approvals Queue page — a request awaiting or already decided by the caller. */
+export const approvalQueueItemSchema = z.object({
+  requestId: z.string(),
+  formKey: z.string(),
+  formTitle: z.string(),
+  requesterId: z.string(),
+  requesterName: z.string(),
+  requesterJobTitle: z.string().nullable(),
+  startDate: z.string().nullable(),
+  endDate: z.string().nullable(),
+  submittedAt: z.string(),
+  status: z.string(),
+  /** The caller's own decision on this request. */
+  myDecision: approvalDecisionSchema,
+  chain: z.array(approvalChainEntrySchema),
+});
+export type ApprovalQueueItemDto = z.infer<typeof approvalQueueItemSchema>;
+
+export const approvalQueueResponseSchema = z.object({
+  rows: z.array(approvalQueueItemSchema),
+  awaitingCount: z.number(),
+  decidedCount: z.number(),
+});
+export type ApprovalQueueResponse = z.infer<typeof approvalQueueResponseSchema>;
 
 // ── Enterprise details (self-service, Enterprise Admin only) ───
 /** Company-level info — editable only by the tenant's own Enterprise Admin, never by System Admin. */
