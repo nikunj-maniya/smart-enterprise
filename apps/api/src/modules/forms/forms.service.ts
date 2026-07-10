@@ -2,6 +2,8 @@ import { Prisma } from '@prisma/client';
 import {
   DEFAULT_GENERIC_INITIAL_STATUS,
   parseDefinition,
+  validateStageRules,
+  validateStatusModel,
   type CreateFormDraftRequest,
   type FieldOptions,
   type FieldType,
@@ -12,6 +14,10 @@ import {
   type FormDefinitionSummaryDto,
   type PublishDefinitionInput,
   type SaveDraftFieldsRequest,
+  type SaveDraftRoutingRequest,
+  type SaveDraftStatusModelRequest,
+  type StageRules,
+  type StatusModel,
   type VisibilityRule,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
@@ -366,7 +372,10 @@ export async function createFormDraft(
 /**
  * PUT /forms/drafts/:key — replace the draft's field-set wholesale (add/edit/delete/reorder all
  * collapse to one save). The draft has exactly one section (created with the draft); fields are
- * deleted and recreated in the given order, never mutating a published row.
+ * deleted and recreated in the given order, never mutating a published row. If the draft already
+ * has approval routing configured, the incoming field set is cross-checked against its
+ * `stageRules` via the shared `validateStageRules` so a field a routing stage depends on can't be
+ * deleted or retyped away from a picker type out from under the routing config.
  */
 export async function saveDraftFields(
   tenantId: string,
@@ -378,6 +387,12 @@ export async function saveDraftFields(
   const section = draft.sections[0];
   if (!section) throw new HttpError(400, 'Draft has no section to hold fields');
   const beforeCount = section.fields.length;
+
+  const stageRules = draft.approvalWorkflow?.stageRules as StageRules | undefined;
+  if (stageRules) {
+    const stageRuleErrors = validateStageRules(stageRules, input.fields);
+    if (stageRuleErrors.length > 0) throw new HttpError(400, stageRuleErrors.join('; '));
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     await tx.formField.deleteMany({ where: { sectionId: section.id } });
@@ -410,6 +425,111 @@ export async function saveDraftFields(
         action: 'save_draft_fields',
         before: { fieldCount: beforeCount },
         after: { fieldCount: input.fields.length },
+      },
+    });
+    return tx.formDefinition.findUniqueOrThrow({ where: { id: draft.id }, include: fullInclude });
+  });
+
+  return toDefinitionDto(updated);
+}
+
+/** Nested writes to a draft's child rows (routing, status model, ...) don't touch the parent
+ * `FormDefinition` row — bump it explicitly so the builder list's "updated {date}" reflects the save. */
+function touchDraft(tx: Prisma.TransactionClient, draftId: string): Promise<unknown> {
+  return tx.formDefinition.update({ where: { id: draftId }, data: {} });
+}
+
+/**
+ * PUT /forms/drafts/:key/routing — replace the draft's approval routing config wholesale.
+ * Cross-checks every `field`-sourced approver rule against the draft's current field set
+ * (exists + is a picker type) via the shared `validateStageRules`, then upserts the draft's
+ * `ApprovalWorkflow` row (1:1 with the form-definition row-set), never mutating a published row.
+ */
+export async function saveDraftRouting(
+  tenantId: string,
+  actorId: string,
+  key: string,
+  input: SaveDraftRoutingRequest,
+): Promise<FormDefinitionDto> {
+  const draft = await findDraft(tenantId, key);
+
+  const fields = draft.sections.flatMap((s) =>
+    s.fields.map((f) => ({ key: f.key, type: f.type as FieldType })),
+  );
+  const errors = validateStageRules(input.stageRules, fields);
+  if (errors.length > 0) throw new HttpError(400, errors.join('; '));
+
+  const before = draft.approvalWorkflow
+    ? { mode: draft.approvalWorkflow.mode, stageRules: draft.approvalWorkflow.stageRules }
+    : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.approvalWorkflow.upsert({
+      where: { formDefinitionId: draft.id },
+      create: { formDefinitionId: draft.id, mode: input.mode, stageRules: jsonInput(input.stageRules) },
+      update: { mode: input.mode, stageRules: jsonInput(input.stageRules) },
+    });
+    await touchDraft(tx, draft.id);
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'FormDefinition',
+        entityId: draft.id,
+        action: 'save_draft_routing',
+        before: jsonInput(before),
+        after: jsonInput({ mode: input.mode, stageRules: input.stageRules }),
+      },
+    });
+    return tx.formDefinition.findUniqueOrThrow({ where: { id: draft.id }, include: fullInclude });
+  });
+
+  return toDefinitionDto(updated);
+}
+
+/**
+ * PUT /forms/drafts/:key/status-model — replace the draft's status model wholesale. This is a
+ * plain upsert of the draft's `StatusModel` row (1:1 with the form-definition row-set), never
+ * mutating a published row. The shared guardrails (>=1 terminal state, no orphan states, no
+ * self-approval) are intentionally *not* enforced here — an admin must be able to save a
+ * work-in-progress model (e.g. a new state added before its transitions are wired) — they're
+ * only checked at publish time, by `publishDraft` below.
+ */
+export async function saveDraftStatusModel(
+  tenantId: string,
+  actorId: string,
+  key: string,
+  input: SaveDraftStatusModelRequest,
+): Promise<FormDefinitionDto> {
+  const draft = await findDraft(tenantId, key);
+
+  const before = draft.statusModel
+    ? { states: draft.statusModel.states, transitions: draft.statusModel.transitions }
+    : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.statusModel.upsert({
+      where: { formDefinitionId: draft.id },
+      create: {
+        formDefinitionId: draft.id,
+        states: input.states as Prisma.InputJsonValue,
+        transitions: input.transitions as Prisma.InputJsonValue,
+      },
+      update: {
+        states: input.states as Prisma.InputJsonValue,
+        transitions: input.transitions as Prisma.InputJsonValue,
+      },
+    });
+    await touchDraft(tx, draft.id);
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        actorId,
+        entity: 'FormDefinition',
+        entityId: draft.id,
+        action: 'save_draft_status_model',
+        before: jsonInput(before),
+        after: jsonInput({ states: input.states, transitions: input.transitions }),
       },
     });
     return tx.formDefinition.findUniqueOrThrow({ where: { id: draft.id }, include: fullInclude });
@@ -459,6 +579,28 @@ export async function publishDraft(tenantId: string, actorId: string, key: strin
     });
   } catch (err) {
     throw new HttpError(400, err instanceof Error ? err.message : 'Invalid form definition');
+  }
+
+  // A status model is optional (a custom form without one falls back to
+  // `DEFAULT_GENERIC_INITIAL_STATUS`); when configured, it must pass the same guardrails the
+  // status-model editor enforces (>=1 terminal state, no orphan states, no self-approval).
+  if (draft.statusModel) {
+    const statusModelErrors = validateStatusModel({
+      states: draft.statusModel.states as StatusModel['states'],
+      transitions: draft.statusModel.transitions as StatusModel['transitions'],
+    });
+    if (statusModelErrors.length > 0) throw new HttpError(400, statusModelErrors.join('; '));
+  }
+
+  // Approval routing is optional too; when configured, its `stageRules` must still resolve
+  // against the draft's *current* field set (a field a stage depends on may have been deleted
+  // or retyped away from a picker since routing was last saved) — same guardrail the routing
+  // editor enforces, re-run here so a stale reference can't slip through to publish.
+  const stageRules = draft.approvalWorkflow?.stageRules as StageRules | undefined;
+  if (stageRules) {
+    const fields = draft.sections.flatMap((s) => s.fields.map((f) => ({ key: f.key, type: f.type as FieldType })));
+    const stageRuleErrors = validateStageRules(stageRules, fields);
+    if (stageRuleErrors.length > 0) throw new HttpError(400, stageRuleErrors.join('; '));
   }
 
   const published = await prisma.$transaction(async (tx) => {

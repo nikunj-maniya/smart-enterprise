@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { collectRuleFields, formFieldSchema } from './form-engine/index.js';
+import {
+  collectRuleFields,
+  formFieldSchema,
+  stageRulesSchema,
+  statusModelSchema,
+} from './form-engine/index.js';
 
 export * from './form-engine/index.js';
 
@@ -842,6 +847,23 @@ export const saveDraftFieldsRequestSchema = z.object({
     ),
 });
 export type SaveDraftFieldsRequest = z.infer<typeof saveDraftFieldsRequestSchema>;
+
+/** PUT /forms/drafts/:key/routing — replace the draft's approval routing config wholesale. This
+ *  schema only checks structural shape; cross-checking each `field`-sourced approver rule against
+ *  the draft's actual fields (exists + is a picker type) is done server-side via the shared
+ *  `validateStageRules`, which needs the draft's current field set that this request body doesn't carry. */
+export const saveDraftRoutingRequestSchema = z.object({
+  mode: z.literal('parallel').default('parallel'),
+  stageRules: stageRulesSchema,
+});
+export type SaveDraftRoutingRequest = z.infer<typeof saveDraftRoutingRequestSchema>;
+
+/** PUT /forms/drafts/:key/status-model — replace the draft's status model wholesale. This schema
+ *  only checks structural shape so admins can persist a work-in-progress model (e.g. a state added
+ *  before its transitions are wired); the shared `validateStatusModel` guardrails (>=1 terminal
+ *  state, no orphan states, no self-approval) are only enforced at publish time. */
+export const saveDraftStatusModelRequestSchema = statusModelSchema;
+export type SaveDraftStatusModelRequest = z.infer<typeof saveDraftStatusModelRequestSchema>;
 
 // ── Request submission (form-engine, tenant-scoped) — PRD §6/§9 ────
 export const createRequestSchema = z.object({

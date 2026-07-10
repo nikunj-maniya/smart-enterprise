@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "tsx --test src/form-engine/fixtures.test.ts"
+    "test": "tsx --test src/form-engine/fixtures.test.ts src/form-engine/status-model.test.ts src/form-engine/metadata.test.ts"
   },
   "dependencies": {
     "zod": "^3.24.1"

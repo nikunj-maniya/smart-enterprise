@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { visibilityRuleSchema } from './rules.js';
+import { collectRuleFields, visibilityRuleSchema } from './rules.js';
 
 // ── Form metadata (mirrors the FormDefinition/Section/Field rows) — PRD §6 ──
 // These Zod schemas describe the JSON shapes read out of the `FormDefinition`,
@@ -121,6 +121,45 @@ export const stageRulesSchema = z.object({
   approvers: z.array(approverRuleSchema),
 });
 export type StageRules = z.infer<typeof stageRulesSchema>;
+
+/** Field types a `field`-sourced approver rule may resolve approver user id(s) from. */
+const PICKER_FIELD_TYPES: ReadonlySet<FieldType> = new Set(['user-picker', 'project-picker']);
+export function isPickerFieldType(type: FieldType): boolean {
+  return PICKER_FIELD_TYPES.has(type);
+}
+
+/**
+ * Validate a form's stage rules against its own field set: every `field`-sourced approver rule
+ * must reference a field that exists on the form and is a picker type (user-picker/project-picker)
+ * — anything else can't resolve to approver user id(s) at submission time (PRD §6/§9). Every field
+ * named in a rule's optional `when` gate must also exist on the form, or the gate would silently
+ * stop matching once that field is gone. Returns one message per offending rule; an empty array
+ * means the stage rules are valid. Kept separate from `stageRulesSchema` because the check needs
+ * the form's field set, which the rules don't carry.
+ */
+export function validateStageRules(
+  stageRules: StageRules,
+  fields: Pick<FormField, 'key' | 'type'>[],
+): string[] {
+  const typeByKey = new Map(fields.map((f) => [f.key, f.type]));
+  const errors: string[] = [];
+  for (const rule of stageRules.approvers) {
+    const type = typeByKey.get(rule.field);
+    if (type === undefined) {
+      errors.push(`Approver field "${rule.field}" is not on this form`);
+    } else if (!isPickerFieldType(type)) {
+      errors.push(`Approver field "${rule.field}" must be a user-picker or project-picker field`);
+    }
+    if (rule.when) {
+      for (const gateKey of collectRuleFields(rule.when.when)) {
+        if (!typeByKey.has(gateKey)) {
+          errors.push(`Approver field "${rule.field}"'s visibility gate references field "${gateKey}", which is not on this form`);
+        }
+      }
+    }
+  }
+  return errors;
+}
 
 /** Field types that render as disabled stubs until Phase 4 object storage lands. */
 const STUB_FIELD_TYPES: ReadonlySet<FieldType> = new Set(['signature', 'file-upload']);
