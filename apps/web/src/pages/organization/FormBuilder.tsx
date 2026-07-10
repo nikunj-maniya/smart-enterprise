@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Check, FileText, GripVertical, PencilLine, Plus, Trash2 } from 'lucide-react';
-import { collectRuleFields, visibilityRuleSchema } from '@se/shared';
+import { collectRuleFields, stageRulesSchema, statusModelSchema, visibilityRuleSchema } from '@se/shared';
 import type {
   CreateFormDraftRequest,
   FieldType,
@@ -8,11 +8,16 @@ import type {
   FormDefinitionDto,
   FormField,
   FormFieldDto,
+  SaveDraftRoutingRequest,
+  StageRules,
+  StatusModel,
 } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { FieldModal, type FieldModalSaveInput, fieldTypeLabel } from '@/components/form-engine/FieldModal';
+import { RoutingEditor } from '@/components/form-engine/RoutingEditor';
+import { StatusModelEditor } from '@/components/form-engine/StatusModelEditor';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
@@ -75,6 +80,17 @@ function fieldsReferencing(fields: FormFieldDto[], key: string): string[] {
     .map((f) => f.label);
 }
 
+/** Whether `key` is named as an approver-stage field in the draft's routing config — deleting it
+ * would leave that stage with a dangling reference, so the caller should block the delete until
+ * the stage is removed (Routing tab). */
+function fieldUsedAsStage(stageRules: StageRules | null, key: string): boolean {
+  return (
+    stageRules?.approvers.some(
+      (rule) => rule.field === key || (rule.when && collectRuleFields(rule.when.when).includes(key)),
+    ) ?? false
+  );
+}
+
 /**
  * Two-pane admin Form Builder (PRD §6/§16, form-builder Slice 1-3): a form list (name, field
  * count, last updated, Draft/Published badge) and a field editor (drag-reorder, Required
@@ -103,6 +119,11 @@ export default function FormBuilder() {
   const [createBusy, setCreateBusy] = React.useState(false);
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [dragIndex, setDragIndex] = React.useState<number | null>(null);
+  const [activeTab, setActiveTab] = React.useState<'fields' | 'routing' | 'statusModel'>('fields');
+  const [routingSaving, setRoutingSaving] = React.useState(false);
+  const [routingError, setRoutingError] = React.useState<string | null>(null);
+  const [statusModelSaving, setStatusModelSaving] = React.useState(false);
+  const [statusModelError, setStatusModelError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -138,6 +159,25 @@ export default function FormBuilder() {
   }, [selectedKey, selectedStatus]);
 
   const fields = React.useMemo(() => detail?.sections.flatMap((s) => s.fields) ?? [], [detail]);
+  const stageRules = React.useMemo<StageRules | null>(() => {
+    const raw = detail?.approvalWorkflow?.stageRules;
+    if (!raw) return null;
+    const parsed = stageRulesSchema.safeParse(raw);
+    return parsed.success ? parsed.data : null;
+  }, [detail]);
+  const statusModel = React.useMemo<StatusModel | null>(() => {
+    const raw = detail?.statusModel;
+    if (!raw) return null;
+    const parsed = statusModelSchema.safeParse(raw);
+    return parsed.success ? parsed.data : null;
+  }, [detail]);
+
+  // Switching forms leaves any stale routing/status-model UI state (tab selection, save error) behind.
+  React.useEffect(() => {
+    setActiveTab('fields');
+    setRoutingError(null);
+    setStatusModelError(null);
+  }, [selectedKey]);
 
   async function persist(nextFields: FormFieldDto[]): Promise<boolean> {
     if (!selectedKey) return false;
@@ -185,7 +225,46 @@ export default function FormBuilder() {
       );
       return;
     }
+    if (fieldUsedAsStage(stageRules, field.key)) {
+      setSaveError(`Can't delete "${field.label}" — it's used as an approver stage in Routing. Remove that stage first.`);
+      return;
+    }
     persist(fields.filter((f) => f.key !== field.key));
+  }
+
+  async function persistRouting(nextStageRules: StageRules): Promise<void> {
+    if (!selectedKey) return;
+    setRoutingSaving(true);
+    setRoutingError(null);
+    try {
+      const body: SaveDraftRoutingRequest = { mode: 'parallel', stageRules: nextStageRules };
+      const updated = await apiFetch<FormDefinitionDto>(`/forms/drafts/${selectedKey}/routing`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      setDetail(updated);
+    } catch (err) {
+      setRoutingError(err instanceof ApiError ? err.message : 'Unable to save routing.');
+    } finally {
+      setRoutingSaving(false);
+    }
+  }
+
+  async function persistStatusModel(nextStatusModel: StatusModel): Promise<void> {
+    if (!selectedKey) return;
+    setStatusModelSaving(true);
+    setStatusModelError(null);
+    try {
+      const updated = await apiFetch<FormDefinitionDto>(`/forms/drafts/${selectedKey}/status-model`, {
+        method: 'PUT',
+        body: JSON.stringify(nextStatusModel),
+      });
+      setDetail(updated);
+    } catch (err) {
+      setStatusModelError(err instanceof ApiError ? err.message : 'Unable to save the status model.');
+    } finally {
+      setStatusModelSaving(false);
+    }
   }
 
   function onDrop(targetIndex: number) {
@@ -326,16 +405,35 @@ export default function FormBuilder() {
                     {FORM_STATUS_STYLE[selectedItem.status]?.label ?? selectedItem.status}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="ml-auto"
-                  disabled={!isEditable}
-                  onClick={() => setFieldModal({ mode: 'add', field: null })}
-                >
-                  <Plus size={15} />
-                  Add Field
-                </Button>
+                {activeTab === 'fields' && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="ml-auto"
+                    disabled={!isEditable}
+                    onClick={() => setFieldModal({ mode: 'add', field: null })}
+                  >
+                    <Plus size={15} />
+                    Add Field
+                  </Button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 border-b border-line-soft px-5 py-3">
+                {(['fields', 'routing', 'statusModel'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`rounded-lg border px-[13px] py-[7px] text-[12.5px] font-semibold transition-colors ${
+                      activeTab === tab
+                        ? 'border-brand bg-brand text-white'
+                        : 'border-line-soft bg-surface text-ink-500 hover:bg-surface-muted'
+                    }`}
+                  >
+                    {tab === 'fields' ? 'Fields' : tab === 'routing' ? 'Routing' : 'Status Model'}
+                  </button>
+                ))}
               </div>
 
               {!isEditable && (
@@ -359,6 +457,25 @@ export default function FormBuilder() {
                   <div className="py-12 text-center text-sm text-ink-400">Loading…</div>
                 ) : detailError ? (
                   <div className="py-12 text-center text-sm text-danger">{detailError}</div>
+                ) : activeTab === 'routing' ? (
+                  <RoutingEditor
+                    key={selectedKey}
+                    fields={fields}
+                    stageRules={stageRules}
+                    disabled={!isEditable}
+                    saving={routingSaving}
+                    error={routingError}
+                    onSave={persistRouting}
+                  />
+                ) : activeTab === 'statusModel' ? (
+                  <StatusModelEditor
+                    key={selectedKey}
+                    statusModel={statusModel}
+                    disabled={!isEditable}
+                    saving={statusModelSaving}
+                    error={statusModelError}
+                    onSave={persistStatusModel}
+                  />
                 ) : fields.length === 0 ? (
                   <div className="rounded-[10px] border border-dashed border-line bg-app-bg px-3 py-8 text-center text-[13px] text-ink-400">
                     No fields yet. Add your first field to get started.
@@ -404,13 +521,15 @@ export default function FormBuilder() {
                           <button
                             type="button"
                             className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-danger/10 hover:text-danger disabled:cursor-default disabled:opacity-40"
-                            disabled={!isEditable || referencedBy.length > 0}
+                            disabled={!isEditable || referencedBy.length > 0 || fieldUsedAsStage(stageRules, field.key)}
                             onClick={() => onDeleteField(field)}
                             aria-label={`Delete ${field.label}`}
                             title={
                               referencedBy.length > 0
                                 ? `Referenced by ${referencedBy.join(', ')}'s visibility condition — remove that condition first`
-                                : undefined
+                                : fieldUsedAsStage(stageRules, field.key)
+                                  ? 'Used as an approver stage in Routing — remove that stage first'
+                                  : undefined
                             }
                           >
                             <Trash2 size={16} />
@@ -453,6 +572,7 @@ export default function FormBuilder() {
           otherFields={fields
             .filter((f) => f.key !== fieldModal.field?.key)
             .map((f) => ({ key: f.key, label: f.label, type: f.type as FieldType }))}
+          usedAsStage={fieldModal.field !== null && fieldUsedAsStage(stageRules, fieldModal.field.key)}
           busy={saving}
           error={saveError}
           onClose={() => setFieldModal(null)}

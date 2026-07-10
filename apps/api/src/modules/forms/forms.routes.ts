@@ -10,6 +10,13 @@ formsRouter.get('/drafts', requireAuth, requireEnterpriseAdmin, formsController.
 formsRouter.post('/drafts', requireAuth, requireEnterpriseAdmin, formsController.createDraft);
 formsRouter.get('/drafts/:key', requireAuth, requireEnterpriseAdmin, formsController.getDraft);
 formsRouter.put('/drafts/:key', requireAuth, requireEnterpriseAdmin, formsController.saveDraft);
+formsRouter.put('/drafts/:key/routing', requireAuth, requireEnterpriseAdmin, formsController.saveDraftRouting);
+formsRouter.put(
+  '/drafts/:key/status-model',
+  requireAuth,
+  requireEnterpriseAdmin,
+  formsController.saveDraftStatusModel,
+);
 formsRouter.post('/drafts/:key/publish', requireAuth, requireEnterpriseAdmin, formsController.publishDraft);
 formsRouter.post('/drafts/:key/start', requireAuth, requireEnterpriseAdmin, formsController.startDraft);
 formsRouter.get('/:key', requireAuth, formsController.getByKey);

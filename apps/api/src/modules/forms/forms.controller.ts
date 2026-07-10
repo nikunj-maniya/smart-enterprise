@@ -3,6 +3,8 @@ import {
   createFormDraftRequestSchema,
   publishFormRequestSchema,
   saveDraftFieldsRequestSchema,
+  saveDraftRoutingRequestSchema,
+  saveDraftStatusModelRequestSchema,
 } from '@se/shared';
 import * as formsService from './forms.service.js';
 
@@ -65,6 +67,36 @@ export async function saveDraft(req: Request, res: Response, next: NextFunction)
   try {
     const body = saveDraftFieldsRequestSchema.parse(req.body);
     const dto = await formsService.saveDraftFields(
+      req.user!.tenantId!,
+      req.user!.id,
+      req.params.key,
+      body,
+    );
+    res.json(dto);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function saveDraftRouting(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = saveDraftRoutingRequestSchema.parse(req.body);
+    const dto = await formsService.saveDraftRouting(
+      req.user!.tenantId!,
+      req.user!.id,
+      req.params.key,
+      body,
+    );
+    res.json(dto);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function saveDraftStatusModel(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = saveDraftStatusModelRequestSchema.parse(req.body);
+    const dto = await formsService.saveDraftStatusModel(
       req.user!.tenantId!,
       req.user!.id,
       req.params.key,

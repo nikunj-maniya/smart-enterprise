@@ -2,12 +2,17 @@ import * as React from 'react';
 import { Check, ChevronDown, ListPlus, Plus, X } from 'lucide-react';
 import {
   asOptionList,
+  asPickerConfig,
+  isPickerFieldType,
   visibilityRuleSchema,
   RULE_GRAMMAR_VERSION,
+  SYSTEM_ROLE_KEYS,
+  SYSTEM_ROLE_NAMES,
   type FieldOptions,
   type FieldOption,
   type FieldType,
   type FormFieldDto,
+  type PickerConfig,
   type RuleLeaf,
   type RuleNode,
   type RuleOp,
@@ -15,6 +20,7 @@ import {
 } from '@se/shared';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
+import { CheckboxGlyph } from '@/components/form-engine/fields/shared';
 
 /** Field types whose values come from a fixed option list (per `fieldOptionsSchema`'s array branch). */
 const CHOICE_TYPES: FieldType[] = ['single-select', 'multi-select', 'radio', 'checkbox-group'];
@@ -43,8 +49,10 @@ export function fieldTypeLabel(type: string): string {
   return FIELD_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type;
 }
 
-/** Human-friendly labels over `ruleOp` (`rules.ts`) for the condition row's operator select. */
-const RULE_OP_OPTIONS: { value: RuleOp; label: string }[] = [
+/** Human-friendly labels over `ruleOp` (`rules.ts`) for the condition row's operator select.
+ * Exported for reuse by `RoutingEditor`'s per-stage visibility-gate row, which edits the same
+ * `VisibilityRule` grammar via a single-row instance of this editor. */
+export const RULE_OP_OPTIONS: { value: RuleOp; label: string }[] = [
   { value: 'eq', label: 'is' },
   { value: 'neq', label: 'is not' },
   { value: 'gt', label: 'greater than' },
@@ -56,12 +64,12 @@ const RULE_OP_OPTIONS: { value: RuleOp; label: string }[] = [
   { value: 'empty', label: 'is empty' },
   { value: 'notEmpty', label: 'is not empty' },
 ];
-const RULE_OPS_WITHOUT_VALUE: RuleOp[] = ['empty', 'notEmpty'];
-const RULE_OPS_WITH_LIST_VALUE: RuleOp[] = ['in', 'nin'];
+export const RULE_OPS_WITHOUT_VALUE: RuleOp[] = ['empty', 'notEmpty'];
+export const RULE_OPS_WITH_LIST_VALUE: RuleOp[] = ['in', 'nin'];
 
 /** One editable "show when" row, mapped to/from a `RuleLeaf` (`{ field, op, value }`). `value` is
  * always edited as text; list-valued ops (`in`/`nin`) split it on commas at save time. */
-interface RuleRow {
+export interface RuleRow {
   field: string;
   op: RuleOp;
   value: string;
@@ -77,8 +85,8 @@ function leafToRow(leaf: RuleLeaf): RuleRow {
 
 /** Load a stored rule into flat rows. Only a single leaf or a top-level AND of leaves round-trips
  * through this editor (the MVP intentionally supports a flat AND-list, not nested and/or — see
- * design notes); anything else parses to no rows. */
-function rowsFromRule(rule: unknown): RuleRow[] {
+ * design notes); anything else parses to no rows. Exported for `RoutingEditor`'s single-row gate. */
+export function rowsFromRule(rule: unknown): RuleRow[] {
   const parsed = visibilityRuleSchema.safeParse(rule);
   if (!parsed.success) return [];
   const node = parsed.data.when;
@@ -102,7 +110,7 @@ function isRuleFullyRepresentable(node: RuleNode): boolean {
  * "Checked"/"Unchecked" select (always one of `'true'`/`'false'`, never empty) — its default
  * must match what it renders, otherwise the row's real value silently stays empty until the
  * admin touches the control, and an untouched row gets dropped as incomplete on save. */
-function defaultRuleValue(fieldType: FieldType | undefined): string {
+export function defaultRuleValue(fieldType: FieldType | undefined): string {
   return fieldType === 'checkbox' ? 'false' : '';
 }
 
@@ -122,7 +130,10 @@ function coerceLeafValue(fieldType: FieldType | undefined, raw: string): unknown
 /** Serialize rows back into the wire `VisibilityRule` grammar, dropping incomplete rows
  * (no field chosen, or a still-empty value for an op that needs one). `fieldTypes` maps each
  * referenceable field's key to its `FieldType` so values can be coerced to match. */
-function buildVisibilityRule(rows: RuleRow[], fieldTypes: Map<string, FieldType>): VisibilityRule | undefined {
+export function buildVisibilityRule(
+  rows: RuleRow[],
+  fieldTypes: Map<string, FieldType>,
+): VisibilityRule | undefined {
   const leaves: RuleLeaf[] = [];
   for (const row of rows) {
     if (!row.field) continue;
@@ -151,7 +162,7 @@ function buildVisibilityRule(rows: RuleRow[], fieldTypes: Map<string, FieldType>
 
 /** First reason a row can't be saved as-is: missing a value an op needs, or (for `in`/`nin`) no
  * usable comma-separated values. `null` means every row is complete. */
-function ruleRowError(rows: RuleRow[]): string | null {
+export function ruleRowError(rows: RuleRow[]): string | null {
   for (const row of rows) {
     if (RULE_OPS_WITHOUT_VALUE.includes(row.op)) continue;
     if (RULE_OPS_WITH_LIST_VALUE.includes(row.op)) {
@@ -173,6 +184,63 @@ function uniqueKey(base: string, existing: Set<string>): string {
   let i = 2;
   while (existing.has(`${base}-${i}`)) i++;
   return `${base}-${i}`;
+}
+
+/** A condition row's value control — a free-text/number/date input, a Checked/Unchecked select
+ * when the referenced field is a checkbox, or nothing for value-less ops (`empty`/`notEmpty`).
+ * Exported so `RoutingEditor`'s per-stage visibility-gate row renders the same value control
+ * (and stays in sync with `RULE_OP_OPTIONS`/type coercion) without duplicating this logic. */
+export function RuleValueCell({
+  value,
+  op,
+  refType,
+  onChange,
+  ariaLabel,
+  disabled,
+}: {
+  value: string;
+  op: RuleOp;
+  refType: FieldType | undefined;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  if (RULE_OPS_WITHOUT_VALUE.includes(op)) return null;
+  const isListOp = RULE_OPS_WITH_LIST_VALUE.includes(op);
+  const dateInputType =
+    refType === 'date' ? 'date' : refType === 'datetime' ? 'datetime-local' : refType === 'time' ? 'time' : null;
+
+  if (refType === 'checkbox' && !isListOp) {
+    return (
+      <div className="relative flex h-10 flex-1 items-center rounded-sm border border-line bg-surface">
+        <select
+          value={value === 'true' ? 'true' : 'false'}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={ariaLabel}
+          className="h-full w-full appearance-none border-none bg-transparent pl-3 pr-7 text-sm text-ink-900 outline-none disabled:opacity-60"
+        >
+          <option value="true">Checked</option>
+          <option value="false">Unchecked</option>
+        </select>
+        <ChevronDown size={14} className="pointer-events-none absolute right-2 text-ink-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-10 flex-1 items-center rounded-sm border border-line bg-surface px-3">
+      <input
+        type={dateInputType && !isListOp ? dateInputType : refType === 'number' && !isListOp ? 'number' : 'text'}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={isListOp ? 'value1, value2' : 'Value'}
+        aria-label={ariaLabel}
+        className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none disabled:opacity-60"
+      />
+    </div>
+  );
 }
 
 /** 44×24 pill toggle — no shared Switch component exists yet in `components/ui`. */
@@ -201,8 +269,19 @@ export interface FieldModalSaveInput {
   label: string;
   type: FieldType;
   required: boolean;
-  options?: FieldOption[];
+  options?: FieldOptions;
   visibilityRule?: VisibilityRule;
+}
+
+/** Merge the role-restriction checkboxes into the field's existing picker config (preserving
+ * any `multi`/`departments`/`source` set outside this modal), dropping `roles` when empty
+ * (unrestricted). `undefined` when the merged config would carry no properties at all. */
+function buildPickerOptions(existing: FieldOptions | undefined, roles: string[]): PickerConfig | undefined {
+  const config = asPickerConfig(existing) ?? {};
+  const next: PickerConfig = { ...config, roles: roles.length > 0 ? roles : undefined };
+  return next.multi === undefined && next.roles === undefined && next.departments === undefined && next.source === undefined
+    ? undefined
+    : next;
 }
 
 /** Add/Edit Field modal — label, §6.3 type select, required toggle, and a "show when" visibility-rule
@@ -214,6 +293,7 @@ export function FieldModal({
   initial,
   existingKeys,
   otherFields,
+  usedAsStage = false,
   busy = false,
   error,
   onClose,
@@ -225,6 +305,10 @@ export function FieldModal({
   /** Other fields on this form a visibility rule can reference (excludes the field being edited).
    * `type` drives value coercion/UI so a condition's value matches the referenced field's runtime type. */
   otherFields: { key: string; label: string; type: FieldType }[];
+  /** True when this field is named as an approver-stage field in the draft's Routing config —
+   * changing its type away from a picker type would leave that stage with a dangling reference
+   * (mirrors `FormBuilder`'s delete-guard), so the type select is locked while this is true. */
+  usedAsStage?: boolean;
   busy?: boolean;
   error?: string | null;
   onClose: () => void;
@@ -235,6 +319,9 @@ export function FieldModal({
   const [required, setRequired] = React.useState(initial?.required ?? false);
   const [options, setOptions] = React.useState<FieldOption[]>(
     () => asOptionList(initial?.options as FieldOptions | undefined)?.map((o) => ({ ...o })) ?? [],
+  );
+  const [pickerRoles, setPickerRoles] = React.useState<string[]>(
+    () => asPickerConfig(initial?.options as FieldOptions | undefined)?.roles ?? [],
   );
   const [ruleRows, setRuleRows] = React.useState<RuleRow[]>(() => rowsFromRule(initial?.visibilityRule));
   const [ruleTouched, setRuleTouched] = React.useState(false);
@@ -248,6 +335,11 @@ export function FieldModal({
   const [localError, setLocalError] = React.useState<string | null>(null);
 
   const isChoiceType = CHOICE_TYPES.includes(type);
+  const isPickerType = isPickerFieldType(type);
+
+  function toggleRole(role: string) {
+    setPickerRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
+  }
 
   function addOption() {
     setOptions((prev) => [...prev, { value: uniqueKey('option', new Set(prev.map((o) => o.value))), label: '' }]);
@@ -315,7 +407,11 @@ export function FieldModal({
       label: trimmed,
       type,
       required,
-      options: isChoiceType ? cleanedOptions : undefined,
+      options: isChoiceType
+        ? cleanedOptions
+        : isPickerType
+          ? buildPickerOptions(initial?.options as FieldOptions | undefined, pickerRoles)
+          : undefined,
       visibilityRule,
     });
   }
@@ -352,7 +448,9 @@ export function FieldModal({
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value as FieldType)}
-                className="h-11 w-full appearance-none rounded-sm border border-line bg-surface py-0 pl-3 pr-9 text-sm text-ink-900 outline-none"
+                disabled={usedAsStage}
+                title={usedAsStage ? 'Used as an approver stage in Routing — remove that stage first' : undefined}
+                className="h-11 w-full appearance-none rounded-sm border border-line bg-surface py-0 pl-3 pr-9 text-sm text-ink-900 outline-none disabled:cursor-default disabled:opacity-60"
               >
                 {FIELD_TYPE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value} className="text-ink-900">
@@ -362,6 +460,11 @@ export function FieldModal({
               </select>
               <ChevronDown size={18} className="pointer-events-none absolute right-3 text-ink-400" />
             </div>
+            {usedAsStage && (
+              <div className="text-[12px] text-ink-400">
+                Used as an approver stage in Routing — remove that stage first to change the type.
+              </div>
+            )}
           </label>
 
           {isChoiceType && (
@@ -401,6 +504,31 @@ export function FieldModal({
             </div>
           )}
 
+          {isPickerType && (
+            <div className="flex flex-col gap-2">
+              <div>
+                <div className="text-sm font-semibold text-ink-900">Restrict to roles</div>
+                <div className="text-[12px] text-ink-400">
+                  Only users in the selected roles can be picked. Leave empty to allow anyone — this also names the
+                  role for any approver stage that routes to this field.
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                {SYSTEM_ROLE_KEYS.map((roleKey) => (
+                  <button
+                    key={roleKey}
+                    type="button"
+                    onClick={() => toggleRole(roleKey)}
+                    className="flex items-center gap-2 text-left"
+                  >
+                    <CheckboxGlyph checked={pickerRoles.includes(roleKey)} />
+                    <span className="text-sm text-ink-900">{SYSTEM_ROLE_NAMES[roleKey]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
             <div>
               <div className="text-sm font-semibold text-ink-900">Visibility</div>
@@ -426,11 +554,7 @@ export function FieldModal({
                 {ruleRows.length > 0 && (
                   <div className="flex flex-col gap-2">
                     {ruleRows.map((row, index) => {
-                      const showValue = !RULE_OPS_WITHOUT_VALUE.includes(row.op);
-                      const isListOp = RULE_OPS_WITH_LIST_VALUE.includes(row.op);
                       const refType = otherFields.find((f) => f.key === row.field)?.type;
-                      const dateInputType =
-                        refType === 'date' ? 'date' : refType === 'datetime' ? 'datetime-local' : refType === 'time' ? 'time' : null;
                       return (
                         <div key={index} className="flex items-center gap-2">
                           <div className="relative flex h-10 flex-1 items-center rounded-sm border border-line bg-surface">
@@ -467,33 +591,13 @@ export function FieldModal({
                             </select>
                             <ChevronDown size={14} className="pointer-events-none absolute right-2 text-ink-400" />
                           </div>
-                          {showValue && refType === 'checkbox' && !isListOp ? (
-                            <div className="relative flex h-10 flex-1 items-center rounded-sm border border-line bg-surface">
-                              <select
-                                value={row.value === 'true' ? 'true' : 'false'}
-                                onChange={(e) => updateRuleRow(index, { value: e.target.value })}
-                                aria-label={`Value for condition ${index + 1}`}
-                                className="h-full w-full appearance-none border-none bg-transparent pl-3 pr-7 text-sm text-ink-900 outline-none"
-                              >
-                                <option value="true">Checked</option>
-                                <option value="false">Unchecked</option>
-                              </select>
-                              <ChevronDown size={14} className="pointer-events-none absolute right-2 text-ink-400" />
-                            </div>
-                          ) : (
-                            showValue && (
-                              <div className="flex h-10 flex-1 items-center rounded-sm border border-line bg-surface px-3">
-                                <input
-                                  type={dateInputType && !isListOp ? dateInputType : refType === 'number' && !isListOp ? 'number' : 'text'}
-                                  value={row.value}
-                                  onChange={(e) => updateRuleRow(index, { value: e.target.value })}
-                                  placeholder={isListOp ? 'value1, value2' : 'Value'}
-                                  aria-label={`Value for condition ${index + 1}`}
-                                  className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
-                                />
-                              </div>
-                            )
-                          )}
+                          <RuleValueCell
+                            value={row.value}
+                            op={row.op}
+                            refType={refType}
+                            onChange={(value) => updateRuleRow(index, { value })}
+                            ariaLabel={`Value for condition ${index + 1}`}
+                          />
                           <button
                             type="button"
                             onClick={() => removeRuleRow(index)}
