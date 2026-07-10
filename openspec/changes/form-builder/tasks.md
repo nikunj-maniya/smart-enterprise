@@ -26,7 +26,8 @@
 
 ## 5. Core-Form Editing
 
-- [ ] 5.1 Open core forms in the builder; allow relabel/reorder/validation/routing edits; block structural edits with explanation _(Slice 7)_
+- [x] 5.1 Open core forms in the builder; allow relabel/reorder/validation/routing edits; block structural edits with explanation _(Slice 7)_ — shared `validateCoreFormFieldEdit` (`packages/shared/src/form-engine/metadata.ts`) diffs a core form's field set by key/type, allowing relabel/reorder/required/validation edits and flagging added/removed/retyped fields (4 new tests, 21/21 shared tests pass). `modules/forms/forms.service.ts`: `startFormDraft` no longer blocks core forms (clones the published row-set same as custom forms); `saveDraftFields` gates a structural-diff check on `draft.renderer === 'core'` and 400s naming the problem (`Core forms can't add new fields: <keys>` / `...can't remove fields: <keys>` / `...can't change field type: <keys>`); routing/status-model saves are left unguarded since those edits are explicitly allowed. `pages/organization/FormBuilder.tsx` unifies the published-form banner for core and custom forms (Edit button starts a draft) with a new banner while a core draft is open; Add Field and Delete Field are disabled with an explanatory tooltip for core-form drafts; `FieldModal.tsx`'s field-type select is likewise disabled+tooltipped whenever `isCoreForm`. Live-verified against Postgres on the `leave` core form: draft-start clones v1, relabel/reorder 200 and persist, add/remove/retype each 400 with the specific field named, a custom form's add/retype are unaffected, and publish+`GET /forms/leave` immediately serves the reordered v2 without redeploy.
+  - Non-blocking follow-up noted by QA: `saveDraftFields`'s inline diff logic is equivalent to but duplicates `validateCoreFormFieldEdit` rather than calling it directly — recommend a small follow-up to route through the shared function as the single source of truth.
 
 ## 6. Verify
 

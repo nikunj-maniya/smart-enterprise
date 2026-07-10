@@ -161,6 +161,36 @@ export function validateStageRules(
   return errors;
 }
 
+/**
+ * Guardrail for editing a core form's (Leave, WFH, Visitor, IT) fields in the builder
+ * (form-builder spec, "Core forms editable within metadata bounds"): relabeling, reordering, and
+ * required/validation/visibility-rule edits are allowed on a field that's still present (same key
+ * + type), but the field *set* itself may not change shape — adding a field, removing a field, or
+ * changing an existing field's type all require a new field type/engineering change and are
+ * rejected. Routing edits are validated separately by `validateStageRules`. Returns one message per
+ * offending field; an empty array means the edit is allowed. Mirrors `validateStageRules`'s shape.
+ */
+export function validateCoreFormFieldEdit(
+  before: Pick<FormField, 'key' | 'type'>[],
+  after: Pick<FormField, 'key' | 'type'>[],
+): string[] {
+  const beforeByKey = new Map(before.map((f) => [f.key, f.type]));
+  const afterByKey = new Map(after.map((f) => [f.key, f.type]));
+  const errors: string[] = [];
+
+  for (const key of afterByKey.keys()) {
+    if (!beforeByKey.has(key)) errors.push(`Field "${key}" cannot be added to a core form`);
+  }
+  for (const [key, type] of beforeByKey) {
+    if (!afterByKey.has(key)) {
+      errors.push(`Field "${key}" cannot be removed from a core form`);
+    } else if (afterByKey.get(key) !== type) {
+      errors.push(`Field "${key}"'s type cannot be changed on a core form`);
+    }
+  }
+  return errors;
+}
+
 /** Field types that render as disabled stubs until Phase 4 object storage lands. */
 const STUB_FIELD_TYPES: ReadonlySet<FieldType> = new Set(['signature', 'file-upload']);
 /** Layout-only field types that carry no payload value. */

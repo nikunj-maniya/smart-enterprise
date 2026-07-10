@@ -96,8 +96,9 @@ function fieldUsedAsStage(stageRules: StageRules | null, key: string): boolean {
  * count, last updated, Draft/Published badge) and a field editor (drag-reorder, Required
  * toggle, edit/delete, Add/Edit Field modal) — every mutation saves immediately as a Draft
  * via `PUT /forms/drafts/:key`. Publish flips the draft to an immutable published version
- * (`POST /forms/drafts/:key/publish`); editing a published custom form starts a new draft
- * (`POST /forms/drafts/:key/start`). Core forms stay read-only in the builder until Slice 7.
+ * (`POST /forms/drafts/:key/publish`); editing a published form (core or custom) starts a new
+ * draft (`POST /forms/drafts/:key/start`). Core-form drafts are locked to metadata-bounds edits —
+ * Add Field, Delete Field, and the field-type select are disabled with an explanatory tooltip.
  */
 export default function FormBuilder() {
   const { user } = useAuth();
@@ -143,6 +144,10 @@ export default function FormBuilder() {
   const selectedItem = forms.find((f) => f.key === selectedKey) ?? null;
   const selectedStatus = selectedItem?.status;
   const isEditable = selectedStatus === 'draft';
+  const isCoreForm = selectedItem?.renderer === 'core';
+  /** Core-form drafts are locked to metadata-bounds edits (relabel/reorder/validation/routing) —
+   * adding or deleting a field, or changing a field's type, is a structural edit the server refuses. */
+  const coreLockTitle = 'Core form fields are structural — relabel, reorder, or edit validation instead.';
 
   React.useEffect(() => {
     if (!selectedKey || !selectedStatus) {
@@ -410,7 +415,8 @@ export default function FormBuilder() {
                     size="sm"
                     variant="secondary"
                     className="ml-auto"
-                    disabled={!isEditable}
+                    disabled={!isEditable || isCoreForm}
+                    title={isCoreForm ? coreLockTitle : undefined}
                     onClick={() => setFieldModal({ mode: 'add', field: null })}
                   >
                     <Plus size={15} />
@@ -438,17 +444,17 @@ export default function FormBuilder() {
 
               {!isEditable && (
                 <div className="flex items-center justify-between gap-3 border-b border-line-soft bg-app-bg px-5 py-3 text-[12.5px] text-ink-400">
-                  {selectedItem.renderer === 'core' ? (
-                    <span>Core forms are not editable in the builder yet.</span>
-                  ) : (
-                    <>
-                      <span>This form is published. Start a new draft to make changes.</span>
-                      <Button size="sm" variant="secondary" disabled={startingDraft} onClick={onStartDraft}>
-                        <PencilLine size={14} />
-                        {startingDraft ? 'Starting…' : 'Edit'}
-                      </Button>
-                    </>
-                  )}
+                  <span>This form is published. Start a new draft to make changes.</span>
+                  <Button size="sm" variant="secondary" disabled={startingDraft} onClick={onStartDraft}>
+                    <PencilLine size={14} />
+                    {startingDraft ? 'Starting…' : 'Edit'}
+                  </Button>
+                </div>
+              )}
+              {isEditable && isCoreForm && (
+                <div className="border-b border-line-soft bg-app-bg px-5 py-3 text-[12.5px] text-ink-400">
+                  Core form fields can be relabeled, reordered, and have their validation or routing edited — adding,
+                  removing, or retyping a field isn't supported here.
                 </div>
               )}
 
@@ -521,15 +527,19 @@ export default function FormBuilder() {
                           <button
                             type="button"
                             className="flex-none rounded-[6px] p-1 text-ink-400 hover:bg-danger/10 hover:text-danger disabled:cursor-default disabled:opacity-40"
-                            disabled={!isEditable || referencedBy.length > 0 || fieldUsedAsStage(stageRules, field.key)}
+                            disabled={
+                              !isEditable || isCoreForm || referencedBy.length > 0 || fieldUsedAsStage(stageRules, field.key)
+                            }
                             onClick={() => onDeleteField(field)}
                             aria-label={`Delete ${field.label}`}
                             title={
-                              referencedBy.length > 0
-                                ? `Referenced by ${referencedBy.join(', ')}'s visibility condition — remove that condition first`
-                                : fieldUsedAsStage(stageRules, field.key)
-                                  ? 'Used as an approver stage in Routing — remove that stage first'
-                                  : undefined
+                              isCoreForm
+                                ? coreLockTitle
+                                : referencedBy.length > 0
+                                  ? `Referenced by ${referencedBy.join(', ')}'s visibility condition — remove that condition first`
+                                  : fieldUsedAsStage(stageRules, field.key)
+                                    ? 'Used as an approver stage in Routing — remove that stage first'
+                                    : undefined
                             }
                           >
                             <Trash2 size={16} />
@@ -573,6 +583,7 @@ export default function FormBuilder() {
             .filter((f) => f.key !== fieldModal.field?.key)
             .map((f) => ({ key: f.key, label: f.label, type: f.type as FieldType }))}
           usedAsStage={fieldModal.field !== null && fieldUsedAsStage(stageRules, fieldModal.field.key)}
+          isCoreForm={isCoreForm}
           busy={saving}
           error={saveError}
           onClose={() => setFieldModal(null)}

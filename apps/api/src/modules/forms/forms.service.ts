@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import {
   DEFAULT_GENERIC_INITIAL_STATUS,
   parseDefinition,
+  validateCoreFormFieldEdit,
   validateStageRules,
   validateStatusModel,
   type CreateFormDraftRequest,
@@ -375,7 +376,10 @@ export async function createFormDraft(
  * deleted and recreated in the given order, never mutating a published row. If the draft already
  * has approval routing configured, the incoming field set is cross-checked against its
  * `stageRules` via the shared `validateStageRules` so a field a routing stage depends on can't be
- * deleted or retyped away from a picker type out from under the routing config.
+ * deleted or retyped away from a picker type out from under the routing config. Core-form drafts
+ * are editable within metadata bounds only (relabel/reorder/validation) — adding a field, removing
+ * a field, or changing a field's type is a structural edit and is refused with a 400 naming which
+ * field(s) and problem.
  */
 export async function saveDraftFields(
   tenantId: string,
@@ -387,6 +391,12 @@ export async function saveDraftFields(
   const section = draft.sections[0];
   if (!section) throw new HttpError(400, 'Draft has no section to hold fields');
   const beforeCount = section.fields.length;
+
+  if (draft.renderer === 'core') {
+    const currentFields = section.fields.map((f) => ({ key: f.key, type: f.type as FieldType }));
+    const coreFieldErrors = validateCoreFormFieldEdit(currentFields, input.fields);
+    if (coreFieldErrors.length > 0) throw new HttpError(400, coreFieldErrors.join('; '));
+  }
 
   const stageRules = draft.approvalWorkflow?.stageRules as StageRules | undefined;
   if (stageRules) {
@@ -626,10 +636,11 @@ export async function publishDraft(tenantId: string, actorId: string, key: strin
 }
 
 /**
- * POST /forms/drafts/:key/start — begin editing a published, non-core form: clone its latest
- * published row-set into a new Draft at `version + 1`, leaving the published row untouched
- * (immutable). Idempotent — if a draft already exists for the key, it's returned as-is. Core
- * forms aren't editable through the builder yet (Slice 7).
+ * POST /forms/drafts/:key/start — begin editing a published form (core or custom): clone its
+ * latest published row-set into a new Draft at `version + 1`, leaving the published row untouched
+ * (immutable). Idempotent — if a draft already exists for the key, it's returned as-is. Core-form
+ * drafts stay within metadata bounds — `saveDraftFields` below rejects structural edits (added
+ * fields, removed fields, retyped fields) once a core draft exists.
  */
 export async function startFormDraft(tenantId: string, actorId: string, key: string): Promise<FormDefinitionDto> {
   const existingDraft = await prisma.formDefinition.findFirst({
@@ -640,9 +651,6 @@ export async function startFormDraft(tenantId: string, actorId: string, key: str
   if (existingDraft) return toDefinitionDto(existingDraft);
 
   const published = await findPublished(tenantId, key);
-  if (published.renderer === 'core') {
-    throw new HttpError(400, 'Core forms are not editable in the builder yet');
-  }
 
   const created = await prisma.$transaction(async (tx) => {
     const def = await tx.formDefinition.create({

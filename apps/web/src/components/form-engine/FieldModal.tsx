@@ -294,6 +294,7 @@ export function FieldModal({
   existingKeys,
   otherFields,
   usedAsStage = false,
+  isCoreForm = false,
   busy = false,
   error,
   onClose,
@@ -309,6 +310,9 @@ export function FieldModal({
    * changing its type away from a picker type would leave that stage with a dangling reference
    * (mirrors `FormBuilder`'s delete-guard), so the type select is locked while this is true. */
   usedAsStage?: boolean;
+  /** True when editing a core-form draft — field type is a structural property the server refuses
+   * to change on core forms, so the type select is locked regardless of `usedAsStage`. */
+  isCoreForm?: boolean;
   busy?: boolean;
   error?: string | null;
   onClose: () => void;
@@ -448,8 +452,14 @@ export function FieldModal({
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value as FieldType)}
-                disabled={usedAsStage}
-                title={usedAsStage ? 'Used as an approver stage in Routing — remove that stage first' : undefined}
+                disabled={usedAsStage || isCoreForm}
+                title={
+                  usedAsStage
+                    ? 'Used as an approver stage in Routing — remove that stage first'
+                    : isCoreForm
+                      ? "Core form fields can't change type — relabel, reorder, or edit validation instead."
+                      : undefined
+                }
                 className="h-11 w-full appearance-none rounded-sm border border-line bg-surface py-0 pl-3 pr-9 text-sm text-ink-900 outline-none disabled:cursor-default disabled:opacity-60"
               >
                 {FIELD_TYPE_OPTIONS.map((o) => (
@@ -463,6 +473,11 @@ export function FieldModal({
             {usedAsStage && (
               <div className="text-[12px] text-ink-400">
                 Used as an approver stage in Routing — remove that stage first to change the type.
+              </div>
+            )}
+            {!usedAsStage && isCoreForm && (
+              <div className="text-[12px] text-ink-400">
+                Core form fields can't change type — relabel, reorder, or edit validation instead.
               </div>
             )}
           </label>
