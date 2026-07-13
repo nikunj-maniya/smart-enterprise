@@ -63,3 +63,13 @@ body,
 * {
   box-sizing: border-box;
 }
+
+/* Scrollable regions that shouldn't show a visible scrollbar (e.g. the sidebar nav) — the
+   element still scrolls with wheel/touch/keyboard, only the track/thumb are hidden. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Edge (Chromium) */
+}

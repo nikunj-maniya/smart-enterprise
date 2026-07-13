@@ -147,8 +147,9 @@ export function Sidebar() {
         </span>
       </div>
 
-      {/* Scrollable nav content — everything between the fixed brand header and user footer */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Scrollable nav content — everything between the fixed brand header and user footer.
+          Scrollbar is hidden (no-scrollbar) — it still scrolls, just without a visible track. */}
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
         {/* Requests — every tenant user (not the platform-level System Admin) */}
         {!user?.isSystemAdmin && (
           <div className="flex flex-col gap-[3px]">
