@@ -126,11 +126,11 @@ export function Sidebar() {
     (user?.roles.includes(SystemRoleKey.TechLead) ?? false);
   return (
     <div
-      className="flex w-[248px] flex-none flex-col px-[14px] py-[18px]"
+      className="flex h-full w-[248px] flex-none flex-col px-[14px] py-[18px]"
       style={{ background: 'var(--brand)' }}
     >
       {/* Brand */}
-      <div className="flex items-center gap-3 px-2 pb-5 pt-[6px]">
+      <div className="flex flex-none items-center gap-3 px-2 pb-5 pt-[6px]">
         <svg width={34} height={34} viewBox="0 0 40 40" fill="none">
           <rect width="40" height="40" rx="11" fill="#163E3E" />
           <path
@@ -147,61 +147,65 @@ export function Sidebar() {
         </span>
       </div>
 
-      {/* Requests — every tenant user (not the platform-level System Admin) */}
-      {!user?.isSystemAdmin && (
-        <div className="flex flex-col gap-[3px]">
-          {requestsNav.map((item) => (
-            <SidebarLink key={item.to} {...item} />
-          ))}
-          {isHrHead && <SidebarLink to="/requests/absences" label="Absences" icon={CalendarDays} />}
-          {isReportsViewer && <SidebarLink to="/reports" label="Reports" icon={BarChart3} />}
-        </div>
-      )}
-
-      {/* Platform section — System Admin only */}
-      {user?.isSystemAdmin && (
-        <>
-          <div className="px-[10px] pb-[6px] pt-2 text-[11px] font-semibold tracking-[.6px] text-white/40">
-            PLATFORM
-          </div>
+      {/* Scrollable nav content — everything between the fixed brand header and user footer.
+          Scrollbar is hidden (no-scrollbar) — it still scrolls, just without a visible track. */}
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
+        {/* Requests — every tenant user (not the platform-level System Admin) */}
+        {!user?.isSystemAdmin && (
           <div className="flex flex-col gap-[3px]">
-            {platformNav.map((item) => (
-              <SidebarLink
-                key={item.to}
-                {...item}
-                badge={item.to === '/registrations' ? pendingCount : undefined}
-              />
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Organization section — Enterprise Admin only */}
-      {isEnterpriseAdmin && (
-        <>
-          <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
-            ORGANIZATION
-          </div>
-          <div className="flex flex-col gap-[3px]">
-            {organizationNav.map((item) => (
+            {requestsNav.map((item) => (
               <SidebarLink key={item.to} {...item} />
             ))}
+            {isHrHead && <SidebarLink to="/requests/absences" label="Absences" icon={CalendarDays} />}
+            {isReportsViewer && <SidebarLink to="/reports" label="Reports" icon={BarChart3} />}
           </div>
-        </>
-      )}
+        )}
 
-      {/* System section — System Admin only */}
-      {user?.isSystemAdmin && (
-        <>
-          <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
-            SYSTEM
-          </div>
-          <SidebarLink to="/settings" label="Settings" icon={Settings} />
-        </>
-      )}
+        {/* Platform section — System Admin only */}
+        {user?.isSystemAdmin && (
+          <>
+            <div className="px-[10px] pb-[6px] pt-2 text-[11px] font-semibold tracking-[.6px] text-white/40">
+              PLATFORM
+            </div>
+            <div className="flex flex-col gap-[3px]">
+              {platformNav.map((item) => (
+                <SidebarLink
+                  key={item.to}
+                  {...item}
+                  badge={item.to === '/registrations' ? pendingCount : undefined}
+                />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Organization section — Enterprise Admin only */}
+        {isEnterpriseAdmin && (
+          <>
+            <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
+              ORGANIZATION
+            </div>
+            <div className="flex flex-col gap-[3px]">
+              {organizationNav.map((item) => (
+                <SidebarLink key={item.to} {...item} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* System section — System Admin only */}
+        {user?.isSystemAdmin && (
+          <>
+            <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
+              SYSTEM
+            </div>
+            <SidebarLink to="/settings" label="Settings" icon={Settings} />
+          </>
+        )}
+      </div>
 
       {/* User */}
-      <div className="mt-auto flex items-center gap-[11px] border-t border-white/[0.12] p-[10px]">
+      <div className="flex flex-none items-center gap-[11px] border-t border-white/[0.12] p-[10px]">
         <Initials name={user?.name ?? '?'} />
         <div className="min-w-0">
           <div className="whitespace-nowrap text-[13px] font-semibold text-white">{user?.name}</div>
