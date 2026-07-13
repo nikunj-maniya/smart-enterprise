@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
 
 type StatusFilter = '' | 'active' | 'archived';
 
@@ -302,6 +303,7 @@ export default function Projects() {
   const [statusBusyId, setStatusBusyId] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState<ProjectDto | null>(null);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const { highlightId, rowRef } = useHighlightRow();
   const [deleteBusy, setDeleteBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -447,7 +449,8 @@ export default function Projects() {
         {rows.map((p) => (
           <div
             key={p.id}
-            className={`grid ${GRID} min-w-[820px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0`}
+            ref={p.id === highlightId ? rowRef : undefined}
+            className={`grid ${GRID} min-w-[820px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0 ${highlightRingClass(p.id, highlightId)}`}
           >
             <span className="pr-3 text-sm font-semibold text-ink-900">{p.name}</span>
             <span className="pr-3 text-[13px] text-ink-700">{p.pm?.name ?? '—'}</span>

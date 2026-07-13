@@ -9,6 +9,7 @@ import {
   type CreateRequestInput,
   type MyRequestsQuery,
   type MyRequestsResponse,
+  type RequestDetailDto,
   type RequestDto,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
@@ -16,7 +17,17 @@ import { HttpError } from '../../lib/http-error.js';
 import * as formsService from '../forms/forms.service.js';
 import * as notificationsService from '../notifications/notifications.service.js';
 import { resolveApprovers } from './approver-resolution.js';
+import { applySelfApprovalEscalation } from './escalation.service.js';
 import { extractPromotedColumns } from './extractors.js';
+import {
+  assertHalfDayDatesInRange,
+  assertHrSignoffPresentWhenRequired,
+  computeOverBalance,
+  computeSpecialConditionFlag,
+} from './leave-wfh-rules.js';
+import { createVisitorRecord } from './visitor-lifecycle.js';
+import { assertItemsInActiveCatalog } from './it-catalog-rules.js';
+import { canViewRequestDetail } from './visibility-policy.js';
 
 /**
  * POST /requests — validate the payload against the tenant's latest published
@@ -38,12 +49,28 @@ export async function createRequest(
     throw new HttpError(400, 'Validation failed', result.errors);
   }
 
+  await assertItemsInActiveCatalog(tenantId, input.formKey, result.data!);
+  assertHalfDayDatesInRange(input.formKey, result.data!);
+
   const promoted = extractPromotedColumns(input.formKey, result.data!);
   const stageRules = form.approvalWorkflow ? stageRulesSchema.parse(form.approvalWorkflow.stageRules) : null;
-  const approvers = resolveApprovers(form.definition, stageRules, result.data!);
+  const resolvedApprovers = resolveApprovers(form.definition, stageRules, result.data!);
   const requester = await prisma.user.findUniqueOrThrow({ where: { id: requesterId }, select: { name: true } });
 
+  // Leave/WFH-only computed flags (leave-wfh-requests) — pure reads, done ahead of the
+  // transaction; `null` for every other form.
+  const overBalance = await computeOverBalance(tenantId, requesterId, input.formKey, promoted.totalDays, promoted.leaveTypeId);
+  const specialConditionFlagged = await computeSpecialConditionFlag(tenantId, requesterId, input.formKey, result.data!);
+
   const created = await prisma.$transaction(async (tx) => {
+    // No self-approval (escalation spec): a stage that resolved to the requester is replaced by
+    // its escalation target before the snapshot is written.
+    const approvers = await applySelfApprovalEscalation(tx, tenantId, requesterId, resolvedApprovers);
+
+    // Independent server-side re-check of the >2-days HR-signoff rule — computed from the
+    // actual dates, not trusted from the client's duration radio (leave-requests/wfh-requests specs).
+    assertHrSignoffPresentWhenRequired(input.formKey, result.data!, approvers);
+
     const request = await tx.request.create({
       data: {
         tenantId,
@@ -53,8 +80,13 @@ export async function createRequest(
         status: form.initialStatus,
         payload: result.data as Prisma.InputJsonValue,
         ...promoted,
+        overBalance,
+        specialConditionFlagged,
       },
     });
+    if (input.formKey === 'visitor') {
+      await createVisitorRecord(tx, request.id, result.data!);
+    }
     if (approvers.length > 0) {
       await tx.requestApprover.createMany({
         data: approvers.map((a) => ({
@@ -96,6 +128,59 @@ export async function createRequest(
     formKey: input.formKey,
     status: created.status,
     createdAt: created.createdAt.toISOString(),
+  };
+}
+
+/**
+ * GET /requests/:id — the request's full detail, rendered against its own pinned
+ * `formDefinitionId` (not the tenant's latest-by-key) so a later republish never changes how an
+ * existing request displays. Reachable by the request's own requester or any of its snapshotted
+ * approvers (approvals-queue spec's shared detail drawer); 404s for anyone else, a missing
+ * request, or another tenant's.
+ */
+export async function getRequestById(
+  tenantId: string,
+  callerId: string,
+  id: string,
+): Promise<RequestDetailDto> {
+  const request = await prisma.request.findFirst({
+    where: { id, tenantId },
+    include: { form: { select: { key: true, title: true } }, approvers: true },
+  });
+  if (!request) throw new HttpError(404, 'Request not found');
+
+  if (!canViewRequestDetail(callerId, request)) throw new HttpError(404, 'Request not found');
+
+  const definition = await formsService.getDefinitionById(tenantId, request.formDefinitionId);
+
+  const approverIds = [
+    ...new Set(request.approvers.flatMap((a) => [a.approverId, a.escalatedFromId].filter((v): v is string => !!v))),
+  ];
+  const approverUsers = await prisma.user.findMany({ where: { id: { in: approverIds } }, select: { id: true, name: true } });
+  const nameById = new Map(approverUsers.map((u) => [u.id, u.name]));
+
+  return {
+    id: request.id,
+    formKey: request.form.key,
+    formTitle: request.form.title,
+    status: request.status,
+    payload: request.payload as Record<string, unknown>,
+    createdAt: request.createdAt.toISOString(),
+    startDate: request.startDate?.toISOString() ?? null,
+    endDate: request.endDate?.toISOString() ?? null,
+    definition,
+    requesterId: request.requesterId,
+    overBalance: request.overBalance ?? null,
+    specialConditionFlagged: request.specialConditionFlagged ?? null,
+    approvers: request.approvers.map((a) => ({
+      approverId: a.approverId,
+      approverName: nameById.get(a.approverId) ?? 'Unknown',
+      roleContext: a.roleContext,
+      decision: toDecision(a.decision),
+      comment: a.comment ?? null,
+      escalatedFromName: a.escalatedFromId ? (nameById.get(a.escalatedFromId) ?? 'Unknown') : null,
+      escalationCause: (a.escalationCause as 'on_leave' | 'inactive' | 'timeout' | null) ?? null,
+    })),
   };
 }
 
@@ -193,7 +278,10 @@ export async function listApprovalQueue(
 
   const chainApproverIds = new Set<string>();
   for (const row of myRows) {
-    for (const a of row.request.approvers) chainApproverIds.add(a.approverId);
+    for (const a of row.request.approvers) {
+      chainApproverIds.add(a.approverId);
+      if (a.escalatedFromId) chainApproverIds.add(a.escalatedFromId);
+    }
   }
   const approverUsers = await prisma.user.findMany({
     where: { id: { in: [...chainApproverIds] } },
@@ -215,12 +303,16 @@ export async function listApprovalQueue(
       submittedAt: req.createdAt.toISOString(),
       status: req.status,
       myDecision: toDecision(row.decision),
+      overBalance: req.overBalance ?? null,
+      specialConditionFlagged: req.specialConditionFlagged ?? null,
       chain: req.approvers.map((a) => ({
         approverId: a.approverId,
         approverName: nameByApproverId.get(a.approverId) ?? 'Unknown',
         roleContext: a.roleContext,
         decision: toDecision(a.decision),
         comment: a.comment ?? null,
+        escalatedFromName: a.escalatedFromId ? (nameByApproverId.get(a.escalatedFromId) ?? 'Unknown') : null,
+        escalationCause: (a.escalationCause as 'on_leave' | 'inactive' | 'timeout' | null) ?? null,
       })),
     };
   });

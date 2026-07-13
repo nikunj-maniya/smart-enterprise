@@ -13,6 +13,14 @@ import {
   Settings,
   LogOut,
   LayoutTemplate,
+  CalendarClock,
+  DoorOpen,
+  Wrench,
+  Package,
+  CalendarDays,
+  CalendarRange,
+  MessageSquare,
+  BarChart3,
   type LucideIcon,
 } from 'lucide-react';
 import { SystemRoleKey } from '@se/shared';
@@ -24,6 +32,9 @@ import { cn } from '@/lib/utils';
 const requestsNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: '/requests', label: 'My Requests', icon: ClipboardList, end: true },
   { to: '/requests/approvals', label: 'Approvals', icon: ListChecks },
+  { to: '/requests/hr-signoffs', label: 'HR Sign-offs', icon: ClipboardCheck },
+  { to: '/front-desk', label: 'Front Desk', icon: DoorOpen },
+  { to: '/requests/fulfilment-queue', label: 'Fulfilment Queue', icon: Wrench },
 ];
 
 const platformNav: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
@@ -41,6 +52,10 @@ const organizationNav: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/organization/projects', label: 'Projects', icon: FolderKanban },
   { to: '/organization/details', label: 'Company Details', icon: Building2 },
   { to: '/organization/form-builder', label: 'Form Builder', icon: LayoutTemplate },
+  { to: '/organization/leave-policy', label: 'Leave Policy', icon: CalendarClock },
+  { to: '/organization/item-catalog', label: 'Item Catalog', icon: Package },
+  { to: '/organization/absence-calendar', label: 'Absence Calendar', icon: CalendarRange },
+  { to: '/organization/slack', label: 'Slack Integration', icon: MessageSquare },
 ];
 
 function SidebarLink({
@@ -102,6 +117,13 @@ export function Sidebar() {
   const { user, logout } = useAuth();
   const { pendingCount } = useRegistrationsCount();
   const isEnterpriseAdmin = user?.roles.includes(SystemRoleKey.EnterpriseAdmin) ?? false;
+  const isHrHead = user?.roles.includes(SystemRoleKey.HrHead) ?? false;
+  // Same viewer set `resolveAbsenceScope` (reports/absences visibility policy) authorizes.
+  const isReportsViewer =
+    isEnterpriseAdmin ||
+    isHrHead ||
+    (user?.roles.includes(SystemRoleKey.ProjectManager) ?? false) ||
+    (user?.roles.includes(SystemRoleKey.TechLead) ?? false);
   return (
     <div
       className="flex w-[248px] flex-none flex-col px-[14px] py-[18px]"
@@ -131,6 +153,8 @@ export function Sidebar() {
           {requestsNav.map((item) => (
             <SidebarLink key={item.to} {...item} />
           ))}
+          {isHrHead && <SidebarLink to="/requests/absences" label="Absences" icon={CalendarDays} />}
+          {isReportsViewer && <SidebarLink to="/reports" label="Reports" icon={BarChart3} />}
         </div>
       )}
 

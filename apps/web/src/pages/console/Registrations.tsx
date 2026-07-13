@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useRegistrationsCount } from '@/lib/registrationsCount';
+import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
 
 const GRID_COLS = 'grid-cols-[1.7fr_1.9fr_0.8fr_0.9fr_1fr_1.5fr]';
 
@@ -56,8 +57,11 @@ function Avatar({ name, size }: { name: string; size: number }) {
 }
 
 export default function Registrations() {
+  const { highlightId, rowRef } = useHighlightRow();
+  // A search deep-link may point at an already-reviewed registration — default to "All" so its
+  // row is actually in the list rather than silently filtered out by the default Pending tab.
   const [tab, setTab] = React.useState<typeof RegistrationStatus.Pending | 'All'>(
-    RegistrationStatus.Pending,
+    highlightId ? 'All' : RegistrationStatus.Pending,
   );
   const [rows, setRows] = React.useState<EnterpriseRegistrationDto[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -208,8 +212,9 @@ export default function Registrations() {
         {rows.map((reg) => (
           <div
             key={reg.id}
+            ref={reg.id === highlightId ? rowRef : undefined}
             onClick={() => setReviewing(reg)}
-            className={`grid ${GRID_COLS} min-w-[860px] cursor-pointer items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0 hover:bg-surface-muted`}
+            className={`grid ${GRID_COLS} min-w-[860px] cursor-pointer items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0 hover:bg-surface-muted ${highlightRingClass(reg.id, highlightId)}`}
           >
             <div className="flex min-w-0 items-center gap-3">
               <Avatar name={reg.companyName} size={38} />

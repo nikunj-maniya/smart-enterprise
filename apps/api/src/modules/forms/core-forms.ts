@@ -19,7 +19,10 @@ const LEAVE_TYPES = [
   'Getting married',
 ];
 
-const SOFTWARE_ITEMS = [
+// Exported so `item-catalog.seed.ts` can seed these as the tenant's default `ItemCatalog` rows —
+// the IT form's item fields resolve their live options from that table, not from here (see
+// their `options: { source: 'item-catalog:...' }` marker below).
+export const SOFTWARE_ITEMS = [
   'Bitbucket',
   'Gitlab',
   'Github',
@@ -35,7 +38,7 @@ const SOFTWARE_ITEMS = [
   'Skype',
 ];
 
-const HARDWARE_ITEMS = [
+export const HARDWARE_ITEMS = [
   'Laptop',
   'RAM',
   'Testing phone',
@@ -135,7 +138,13 @@ const leave: PublishDefinitionInput = {
           required: true,
           validation: { dateOrder: { afterField: 'start_date' } },
         },
-        { key: 'half_day_count', label: 'Half-day count', type: 'number', required: false },
+        {
+          key: 'half_day_dates',
+          label: 'Half-day dates',
+          type: 'date-multi',
+          required: false,
+          helpText: 'Pick any dates within your leave range that are half-days.',
+        },
         {
           key: 'leave_type',
           label: 'Type of leave',
@@ -161,21 +170,12 @@ const leave: PublishDefinitionInput = {
       ],
     },
   },
+  // Starts directly in `Pending Approval` (leave-wfh-requests spec: "created in Pending
+  // Approval") — `Draft`/`Submitted` were vestigial states nothing ever transitioned into
+  // or out of automatically, leaving every submission stuck at `Draft` forever.
   statusModel: {
-    states: [
-      'Draft',
-      'Submitted',
-      'Pending Approval',
-      'Approved',
-      'Rejected',
-      'Cancelled',
-      'Withdrawn',
-      'Completed',
-    ],
+    states: ['Pending Approval', 'Approved', 'Rejected', 'Cancelled', 'Withdrawn', 'Completed'],
     transitions: [
-      { from: 'Draft', to: 'Submitted', roles: ['requester'] },
-      { from: 'Submitted', to: 'Pending Approval', roles: ['system'] },
-      { from: 'Submitted', to: 'Withdrawn', roles: ['requester'] },
       { from: 'Pending Approval', to: 'Approved', roles: [SystemRoleKey.ProjectManager, SystemRoleKey.TechLead, SystemRoleKey.HrHead] },
       { from: 'Pending Approval', to: 'Rejected', roles: [SystemRoleKey.ProjectManager, SystemRoleKey.TechLead, SystemRoleKey.HrHead] },
       { from: 'Pending Approval', to: 'Withdrawn', roles: ['requester'] },
@@ -263,7 +263,13 @@ const wfh: PublishDefinitionInput = {
           required: true,
           validation: { dateOrder: { afterField: 'start_date' } },
         },
-        { key: 'half_wfh_count', label: 'Half-WFH count', type: 'number', required: false },
+        {
+          key: 'half_wfh_dates',
+          label: 'Half-WFH dates',
+          type: 'date-multi',
+          required: false,
+          helpText: 'Pick any dates within your WFH range that are half-days.',
+        },
       ],
     },
   ],
@@ -281,21 +287,10 @@ const wfh: PublishDefinitionInput = {
       ],
     },
   },
+  // Same fix as Leave's status model above — starts directly in `Pending Approval`.
   statusModel: {
-    states: [
-      'Draft',
-      'Submitted',
-      'Pending Approval',
-      'Approved',
-      'Rejected',
-      'Cancelled',
-      'Withdrawn',
-      'Completed',
-    ],
+    states: ['Pending Approval', 'Approved', 'Rejected', 'Cancelled', 'Withdrawn', 'Completed'],
     transitions: [
-      { from: 'Draft', to: 'Submitted', roles: ['requester'] },
-      { from: 'Submitted', to: 'Pending Approval', roles: ['system'] },
-      { from: 'Submitted', to: 'Withdrawn', roles: ['requester'] },
       { from: 'Pending Approval', to: 'Approved', roles: [SystemRoleKey.ProjectManager, SystemRoleKey.TechLead, SystemRoleKey.HrHead] },
       { from: 'Pending Approval', to: 'Rejected', roles: [SystemRoleKey.ProjectManager, SystemRoleKey.TechLead, SystemRoleKey.HrHead] },
       { from: 'Pending Approval', to: 'Withdrawn', roles: ['requester'] },
@@ -423,7 +418,10 @@ const it: PublishDefinitionInput = {
           label: 'Software items',
           type: 'checkbox-group',
           required: true,
-          options: opts(...SOFTWARE_ITEMS),
+          // Resolved server-side from the tenant's `ItemCatalog` at read/submit time (design.md:
+          // "master data, not form-field options") — never a static list, so an admin's catalog
+          // edit applies instantly with no republish. See `forms.service.ts`'s catalog resolution.
+          options: { source: 'item-catalog:software' },
         },
         {
           key: 'sw_impact',
@@ -453,7 +451,7 @@ const it: PublishDefinitionInput = {
           label: 'Hardware items',
           type: 'checkbox-group',
           required: true,
-          options: opts(...HARDWARE_ITEMS),
+          options: { source: 'item-catalog:hardware' },
         },
         {
           key: 'hw_impact',

@@ -24,8 +24,8 @@
 
 ## 4. Verify
 
-- [ ] 4.1 Seeded System Admin logs in and is forced to change the password
-- [ ] 4.2 Register an enterprise → it appears Pending in the queue
-- [ ] 4.3 Accept activates the enterprise + admin; the admin can log in with the registration password
-- [ ] 4.4 Reject captures a reason and frees the email for re-registration
-- [ ] 4.5 Every accept/reject/suspend/reactivate appears in the Audit Log
+- [x] 4.1 Seeded System Admin logs in and is forced to change the password
+- [x] 4.2 Register an enterprise → it appears Pending in the queue
+- [x] 4.3 Accept activates the enterprise + admin; the admin can log in with the registration password
+- [x] 4.4 Reject captures a reason and permanently blocks the email from re-registration
+- [x] 4.5 Every accept/reject/suspend/reactivate appears in the Audit Log

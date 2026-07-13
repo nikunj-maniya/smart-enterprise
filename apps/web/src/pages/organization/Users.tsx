@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
 
 const GRID = 'grid-cols-[2fr_1.3fr_1.3fr_1fr_1fr]';
 
@@ -587,6 +588,7 @@ export default function OrgUsers() {
   const [adding, setAdding] = React.useState(false);
   const [editing, setEditing] = React.useState<OrgUserDto | null>(null);
   const [linkModalOpen, setLinkModalOpen] = React.useState(false);
+  const { highlightId, rowRef } = useHighlightRow();
   const [deactivating, setDeactivating] = React.useState<OrgUserDto | null>(null);
   const [rejecting, setRejecting] = React.useState<OrgUserDto | null>(null);
   const [removing, setRemoving] = React.useState<OrgUserDto | null>(null);
@@ -823,7 +825,8 @@ export default function OrgUsers() {
         {rows.map((u) => (
           <div
             key={u.id}
-            className={`grid ${GRID} min-w-[820px] items-center border-b border-line-soft px-[22px] py-[13px] last:border-b-0`}
+            ref={u.id === highlightId ? rowRef : undefined}
+            className={`grid ${GRID} min-w-[820px] items-center border-b border-line-soft px-[22px] py-[13px] last:border-b-0 ${highlightRingClass(u.id, highlightId)}`}
           >
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-8 w-8 flex-none items-center justify-center rounded-[9px] bg-[rgb(236,245,246)] text-[13px] font-bold text-brand">

@@ -11,24 +11,30 @@ import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useHighlightRow } from '@/lib/useHighlightRow';
 
 function DepartmentCard({
   dept,
   onEdit,
   onDelete,
   onToggleArchive,
+  highlighted,
+  cardRef,
 }: {
   dept: DepartmentDto;
   onEdit: () => void;
   onDelete: () => void;
   onToggleArchive: () => void;
+  highlighted?: boolean;
+  cardRef?: (el: HTMLDivElement | null) => void;
 }) {
   const headNames = dept.heads.map((h) => h.name).join(', ');
   return (
     <div
+      ref={cardRef}
       className={`rounded-[14px] border border-line-soft bg-surface p-5 shadow-card ${
         dept.archived ? 'opacity-70' : ''
-      }`}
+      } ${highlighted ? 'ring-2 ring-brand ring-offset-2' : ''}`}
     >
       <div className="flex items-center gap-3">
         <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[11px] bg-[rgb(236,245,246)]">
@@ -224,6 +230,7 @@ export default function Departments() {
   const [deleting, setDeleting] = React.useState<DepartmentDto | null>(null);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const { highlightId, rowRef } = useHighlightRow();
 
   React.useEffect(() => {
     apiFetch<OrgUserPickerDto[]>('/org-users/options').then(setUsers);
@@ -322,6 +329,8 @@ export default function Departments() {
             <DepartmentCard
               key={dept.id}
               dept={dept}
+              highlighted={dept.id === highlightId}
+              cardRef={dept.id === highlightId ? rowRef : undefined}
               onEdit={() => setEditing(dept)}
               onDelete={() => {
                 setDeleting(dept);

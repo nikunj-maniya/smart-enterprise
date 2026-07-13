@@ -1,12 +1,12 @@
 import * as React from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { CheckCircle2, Send } from 'lucide-react';
-import type { FormDefinitionDto, RequestDto } from '@se/shared';
+import { CheckCircle2, Send, TriangleAlert } from 'lucide-react';
+import { isFieldVisible, type FormDefinitionDto, type LeaveBalanceDto, type RequestDto, type StageRules } from '@se/shared';
 import { Button } from '@/components/ui/button';
 import { FormRenderer } from '@/components/form-engine/FormRenderer';
 import { useFormEngine } from '@/components/form-engine/useFormEngine';
 import { definitionFromDto } from '@/components/form-engine/definition';
-import { ApiError, getPublishedForm } from '@/lib/api';
+import { ApiError, getPublishedForm, listMyLeaveBalances } from '@/lib/api';
 
 /**
  * Employee-facing generic renderer page (form-builder Slice 4, PRD §16): loads a published
@@ -61,6 +61,26 @@ function RequestFormCard({ dto, onCancel }: { dto: FormDefinitionDto; onCancel: 
   const [submitting, setSubmitting] = React.useState(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [submitted, setSubmitted] = React.useState<RequestDto | null>(null);
+  const [leaveBalances, setLeaveBalances] = React.useState<LeaveBalanceDto[] | null>(null);
+
+  React.useEffect(() => {
+    if (dto.key !== 'leave') return;
+    listMyLeaveBalances()
+      .then(setLeaveBalances)
+      .catch(() => setLeaveBalances([]));
+  }, [dto.key]);
+
+  // Non-blocking client-side check (leave-wfh-requests spec): compare the in-progress leave
+  // request against the balance fetched once on load — HR still reviews and decides either way.
+  const overBalance = React.useMemo(() => {
+    if (dto.key !== 'leave' || !leaveBalances) return null;
+    const leaveTypeName = engine.values.leave_type;
+    const days = Number(engine.values.number_of_days);
+    if (typeof leaveTypeName !== 'string' || !leaveTypeName || Number.isNaN(days) || days <= 0) return null;
+    const balance = leaveBalances.find((b) => b.leaveTypeName === leaveTypeName);
+    if (!balance || balance.used + days <= balance.total) return null;
+    return balance;
+  }, [dto.key, leaveBalances, engine.values.leave_type, engine.values.number_of_days]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -112,6 +132,19 @@ function RequestFormCard({ dto, onCancel }: { dto: FormDefinitionDto; onCancel: 
           disabled={submitting}
         />
       </div>
+      {overBalance && (
+        <div
+          className="mt-4 flex items-start gap-2 rounded-sm p-3 text-[12.5px] leading-[1.5]"
+          style={{ background: 'rgb(255,247,237)', color: 'rgb(204,78,0)' }}
+        >
+          <TriangleAlert size={16} className="mt-[1px] flex-none" />
+          <span>
+            This request exceeds your remaining balance for {overBalance.leaveTypeName} (
+            {overBalance.used}/{overBalance.total} used). You can still submit — HR will review.
+          </span>
+        </div>
+      )}
+      <ApproversPreview dto={dto} values={engine.values} />
       {submitError && (
         <div className="mt-4 rounded-sm border border-danger/30 bg-danger/[0.08] p-3 text-xs text-danger">
           {submitError}
@@ -127,5 +160,43 @@ function RequestFormCard({ dto, onCancel }: { dto: FormDefinitionDto; onCancel: 
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Routing preview: resolves `approvalWorkflow.stageRules` against the in-progress values —
+ * skipping any stage whose own `when` gate doesn't currently pass — and shows, per remaining
+ * stage, how many approvers are currently picked (directory names aren't resolvable from an id
+ * alone without a by-id lookup endpoint, so a count is shown instead) or that none are selected yet.
+ */
+function ApproversPreview({ dto, values }: { dto: FormDefinitionDto; values: Record<string, unknown> }) {
+  const fieldLabels = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const section of dto.sections) for (const field of section.fields) map.set(field.key, field.label);
+    return map;
+  }, [dto.sections]);
+
+  const stageRules = dto.approvalWorkflow?.stageRules as StageRules | null | undefined;
+  const stages = (stageRules?.approvers ?? []).filter((rule) => !rule.when || isFieldVisible(rule.when, values));
+  if (stages.length === 0) return null;
+
+  return (
+    <div className="mt-6 rounded-sm border border-line-soft bg-surface-muted p-4">
+      <div className="text-[13px] font-semibold text-ink-900">Approvers</div>
+      <div className="mt-3 flex flex-col gap-2">
+        {stages.map((rule, i) => {
+          const raw = values[rule.field];
+          const ids = Array.isArray(raw) ? raw : raw ? [raw] : [];
+          return (
+            <div key={`${rule.field}-${i}`} className="flex items-center justify-between gap-3 text-[13px]">
+              <span className="text-ink-500">{fieldLabels.get(rule.field) ?? rule.field}</span>
+              <span className="font-semibold text-ink-900">
+                {ids.length === 0 ? 'No approver selected yet' : `${ids.length} selected`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

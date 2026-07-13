@@ -1,9 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
+import { notificationsQuerySchema } from '@se/shared';
 import * as notificationsService from './notifications.service.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    res.json(await notificationsService.listNotifications(req.user!.id));
+    const query = notificationsQuerySchema.parse(req.query);
+    res.json(await notificationsService.listNotifications(req.user!.id, query));
   } catch (err) {
     next(err);
   }

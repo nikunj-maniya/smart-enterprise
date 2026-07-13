@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { apiFetch } from '@/lib/api';
+import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
 
 const GRID_COLS = 'grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1.3fr]';
 
@@ -43,6 +44,7 @@ export default function Enterprises() {
   const [confirming, setConfirming] = React.useState<EnterpriseDto | null>(null);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
+  const { highlightId, rowRef } = useHighlightRow();
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [status, setStatus] = React.useState('');
@@ -155,7 +157,8 @@ export default function Enterprises() {
         {rows.map((enterprise) => (
           <div
             key={enterprise.id}
-            className={`grid ${GRID_COLS} min-w-[820px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0`}
+            ref={enterprise.id === highlightId ? rowRef : undefined}
+            className={`grid ${GRID_COLS} min-w-[820px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0 ${highlightRingClass(enterprise.id, highlightId)}`}
           >
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[9px] bg-[rgb(236,245,246)] text-[13px] font-bold text-brand">

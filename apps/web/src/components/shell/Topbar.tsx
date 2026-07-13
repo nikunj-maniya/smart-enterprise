@@ -1,83 +1,13 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Search,
-  Bell,
-  ClipboardCheck,
-  CheckCircle,
-  XCircle,
-  FileText,
-  Plane,
-  Home,
-  Monitor,
-  UserCheck,
-  RefreshCw,
-  Clock,
-  ChevronDown,
-  UserRound,
-  LogOut,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import type { NotificationDto } from '@se/shared';
+import { Search, Bell, ChevronDown, UserRound, LogOut } from 'lucide-react';
+import type { NotificationDto, NotificationsResponse } from '@se/shared';
 import { useAuth } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import { onNewNotification } from '@/lib/socket';
+import { notifStyle } from '@/lib/notificationDisplay';
 import { formatRelativeTime } from '@/lib/formatRelativeTime';
 import { SearchOverlay } from './SearchOverlay';
-
-/** Core form-type icon, per the design (custom/unrecognized forms fall back to a generic doc icon). */
-const FORM_KEY_ICON: Record<string, LucideIcon> = {
-  leave: Plane,
-  wfh: Home,
-  it: Monitor,
-  visitor: UserCheck,
-};
-
-/**
- * Per-type icon/title/target — a `switch` (not a lookup map) so each case narrows `n.payload`
- * to that notification's own variant. Request-event notifications deep-link to the requester's
- * My Requests list or the approver's Approvals Queue (with the request id as a query param so
- * either page can open the matching detail view/card), scoped to the requester/approver roles.
- */
-function notifStyle(n: NotificationDto): { icon: LucideIcon; title: string; to: string } {
-  switch (n.type) {
-    case 'enterprise_registered':
-      return {
-        icon: ClipboardCheck,
-        title: `New enterprise registration — ${n.payload.companyName}`,
-        to: '/registrations',
-      };
-    case 'request_approved':
-      return {
-        icon: CheckCircle,
-        title: `${n.payload.approverName} approved your ${n.payload.formTitle} request`,
-        to: `/requests?requestId=${n.payload.requestId}`,
-      };
-    case 'request_rejected':
-      return {
-        icon: XCircle,
-        title: `${n.payload.approverName} rejected your ${n.payload.formTitle} request`,
-        to: `/requests?requestId=${n.payload.requestId}`,
-      };
-    case 'request_needs_approval':
-      return {
-        icon: FORM_KEY_ICON[n.payload.formKey] ?? FileText,
-        title: `New ${n.payload.formTitle} request from ${n.payload.requesterName} needs your approval`,
-        to: `/requests/approvals?requestId=${n.payload.requestId}`,
-      };
-    case 'request_status_changed':
-      return {
-        icon: RefreshCw,
-        title: `Your ${n.payload.formTitle} request moved to ${n.payload.toState}`,
-        to: `/requests?requestId=${n.payload.requestId}`,
-      };
-    case 'approval_reminder':
-      return {
-        icon: Clock,
-        title: `${n.payload.pendingCount} requests are awaiting your decision`,
-        to: '/requests/approvals',
-      };
-  }
-}
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -99,12 +29,15 @@ function NotificationsMenu() {
   const navigate = useNavigate();
   const [open, setOpen] = React.useState(false);
   const [notifications, setNotifications] = React.useState<NotificationDto[]>([]);
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const [unreadCount, setUnreadCount] = React.useState(0);
 
   React.useEffect(() => {
     const load = () => {
-      apiFetch<NotificationDto[]>('/notifications')
-        .then(setNotifications)
+      apiFetch<NotificationsResponse>('/notifications?pageSize=20')
+        .then((res) => {
+          setNotifications(res.rows);
+          setUnreadCount(res.unreadCount);
+        })
         .catch(() => {});
     };
     load();
@@ -112,8 +45,20 @@ function NotificationsMenu() {
     return () => clearInterval(interval);
   }, []);
 
+  // Live push: a new notification bumps the badge and prepends to the recent list immediately;
+  // the poll above stays as the fallback for whenever the socket is down.
+  React.useEffect(
+    () =>
+      onNewNotification((n) => {
+        setNotifications((prev) => [n, ...prev].slice(0, 20));
+        setUnreadCount((prev) => prev + 1);
+      }),
+    [],
+  );
+
   function markAllRead() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadCount(0);
     apiFetch('/notifications/read-all', { method: 'POST' }).catch(() => {});
   }
 
@@ -121,6 +66,7 @@ function NotificationsMenu() {
     setOpen(false);
     if (!n.read) {
       setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+      setUnreadCount((prev) => Math.max(0, prev - 1));
       apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }).catch(() => {});
     }
     navigate(notifStyle(n).to);
@@ -189,6 +135,16 @@ function NotificationsMenu() {
                 You&rsquo;re all caught up.
               </div>
             )}
+            <button
+              type="button"
+              className="w-full py-3 text-center text-[13px] font-semibold text-brand-hover"
+              onClick={() => {
+                setOpen(false);
+                navigate('/notifications');
+              }}
+            >
+              View all notifications
+            </button>
           </div>
         </>
       )}
@@ -245,6 +201,19 @@ function UserMenu() {
 
 export function Topbar() {
   const [searchOpen, setSearchOpen] = React.useState(false);
+
+  // Cmd/Ctrl+K opens search from anywhere in the app (global-search design.md); the topbar
+  // click below is the universal fallback.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="flex h-16 flex-none items-center gap-4 border-b border-line-soft bg-surface px-7">
