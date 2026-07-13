@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  # Placeholder so importing the Prisma client (typecheck/build/test) doesn't throw when unset.
+  # No live Postgres runs in this workflow — DB-dependent tests must handle that gracefully.
+  DATABASE_URL: postgresql://smart:smart@localhost:5544/smart_enterprise?schema=public
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @se/api run prisma:generate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Audit
+        run: pnpm audit --audit-level=high
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm -r test

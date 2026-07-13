@@ -77,15 +77,6 @@ const IMPLEMENT_SCHEMA = {
 
 const QUALITY_BAR = `Quality bar (non-negotiable): no duplicated code, strong typing (no "any" escapes), proper error/loading/empty-state handling where applicable, input validation at boundaries, accessible & responsive UI where applicable, secure implementation (no injection, no leaked secrets, tenant-scoped queries), no dead code, minimal surgical diffs matching the existing code style exactly. Backend Engineers never edit the Prisma schema directly — coordinate through a Database Engineer task instead. Frontend Engineers never touch backend logic. Database Engineers never implement frontend or business logic.`
 
-const AGENT_TYPE_BY_ROLE = {
-  database: 'database-engineer',
-  backend: 'backend-engineer',
-  frontend: 'frontend-engineer',
-  // UX-tagged implementation work is still code — frontend-engineer implements it.
-  // The dedicated ux-ui-engineer agent is review-only (see UX Review phase below).
-  ux: 'frontend-engineer',
-}
-
 const ROLE_NAME = {
   database: 'Database Engineer',
   backend: 'Backend Engineer',
@@ -167,7 +158,6 @@ for (const w of waveNumbers) {
   const waveResults = await parallel(
     waveTasks.map(t => () => {
       const opts = { phase: 'Implement', label: `${t.role}:${t.id}`, schema: IMPLEMENT_SCHEMA }
-      if (AGENT_TYPE_BY_ROLE[t.role]) opts.agentType = AGENT_TYPE_BY_ROLE[t.role]
       return agent(implementPrompt(t, waveTasks.filter(x => x.id !== t.id), null), opts).then(output => ({ task: t, output }))
     })
   )
@@ -187,7 +177,6 @@ for (const w of waveNumbers) {
         const t = waveTasks.find(x => x.id === id)
         const overlappingFiles = Object.entries(fileOwners).filter(([, o]) => o.includes(id) && o.length > 1).map(([f]) => f)
         const opts = { phase: 'Implement', label: `${t.role}:${t.id}:conflict-retry`, schema: IMPLEMENT_SCHEMA }
-        if (AGENT_TYPE_BY_ROLE[t.role]) opts.agentType = AGENT_TYPE_BY_ROLE[t.role]
         const retryOutput = await agent(
           implementPrompt(t, waveTasks.filter(x => x.id !== t.id), `A parallel teammate this wave also touched: ${overlappingFiles.join(', ')}. Re-inspect the current state of these files (another agent already edited them) and reconcile your change with what's actually there now — do not blindly re-apply your original diff.`),
           opts
@@ -203,7 +192,7 @@ let uxNotes = ''
 if (plan.uiTouched) {
   phase('UX Review')
   const uxReview = await agent(
-    `Review the UI changes just made for this task:
+    `You are the UX/UI Engineer on smartEnterprise, reviewing (not implementing) the UI changes just made for this task:
 
 """
 ${task}
@@ -211,10 +200,10 @@ ${task}
 
 Subtasks implemented: ${plan.tasks.filter(t => t.role === 'frontend' || t.role === 'ux').map(t => `${t.id}: ${t.title}`).join(', ')}
 
-Inspect the actual diff (git status / git diff) against the design reference below (if present) and general visual hierarchy, accessibility, responsiveness, and state-coverage (loading/empty/error/success) standards.
+Inspect the actual diff (git status / git diff) against the design reference below (if present) and general visual hierarchy, accessibility, responsiveness, and state-coverage (loading/empty/error/success) standards. You are reviewing only — do not edit any files.
 ${designNotes ? `\nDesign reference:\n${designNotes}\n` : ''}
 This is advisory, not a blocking gate — report findings but do not fail the task over them.`,
-    { agentType: 'ux-ui-engineer', schema: UX_SCHEMA, phase: 'UX Review', label: 'UX review' }
+    { schema: UX_SCHEMA, phase: 'UX Review', label: 'UX review' }
   )
   uxNotes = uxReview.notes || ''
   if (uxReview.findings?.length) {
@@ -242,7 +231,7 @@ ${plan.tasks.map(t => `${t.id}: ${t.title} (${t.filesHint})`).join('\n')}`,
       { phase: 'QA', label: `automated checks (attempt ${qaAttempt + 1})`, schema: QA_SCHEMA }
     ),
     () => agent(
-      `Adversarially validate the implementation of this task — do not assume the code works:
+      `You are the QA Engineer for smartEnterprise. Adversarially validate the implementation of this task — do not assume the code works, and do not edit any files:
 
 """
 ${task}
@@ -254,7 +243,7 @@ ${plan.tasks.map(t => `${t.id}: ${t.title} (${t.filesHint})`).join('\n')}
 1. Inspect the actual diff (git status / git diff) against the task description above — functional correctness, edge cases, tenant-scoping/permission checks, error/loading/empty states, validation, no dead code, no leftover TODOs.
 2. Report pass=true only if the task's intent is actually met by the code as written.
 3. On failure, list the specific subtask id(s) that failed and exactly what's wrong (repro steps / expected vs actual) in notes.`,
-      { agentType: 'qa-engineer', phase: 'QA', label: `QA engineer (attempt ${qaAttempt + 1})`, schema: QA_SCHEMA }
+      { phase: 'QA', label: `QA engineer (attempt ${qaAttempt + 1})`, schema: QA_SCHEMA }
     ),
   ])
   autoQA = qaPair[0]
@@ -273,7 +262,6 @@ ${plan.tasks.map(t => `${t.id}: ${t.title} (${t.filesHint})`).join('\n')}
   const retryResults = await parallel(
     retryTasks.map(t => () => {
       const opts = { phase: 'Implement', label: `retry:${t.id}`, schema: IMPLEMENT_SCHEMA }
-      if (AGENT_TYPE_BY_ROLE[t.role]) opts.agentType = AGENT_TYPE_BY_ROLE[t.role]
       return agent(implementPrompt(t, retryTasks.filter(x => x.id !== t.id), retryContext), opts).then(output => ({ task: t, output }))
     })
   )
