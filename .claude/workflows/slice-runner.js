@@ -45,6 +45,16 @@ const QA_SCHEMA = {
   required: ['pass', 'failedTaskIds', 'notes'],
 }
 
+const IMPLEMENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    filesChanged: { type: 'array', items: { type: 'string' } },
+    assumptions: { type: 'string' },
+  },
+  required: ['summary', 'filesChanged', 'assumptions'],
+}
+
 const QUALITY_BAR = `Quality bar (non-negotiable): no duplicated code, strong typing (no "any" escapes), proper error/loading/empty-state handling where applicable, input validation at boundaries, accessible & responsive UI where applicable, secure implementation (no injection, no leaked secrets, tenant-scoped queries), no dead code, minimal surgical diffs matching the existing code style exactly. Backend Engineers never edit the Prisma schema directly — coordinate through a Database Engineer task instead. Frontend Engineers never touch backend logic. Database Engineers never implement frontend or business logic.`
 
 const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args
@@ -119,9 +129,9 @@ Running in parallel with you this wave (disjoint file scope — if you find you 
 ${QUALITY_BAR}
 
 Do NOT edit openspec/changes/${change}/tasks.md — checkbox updates happen in a later step.
-${retryContext ? `\nThis is a retry. The previous QA pass failed with:\n${retryContext}\nFix the actual defect — do not just silence the check.` : ''}
+${retryContext ? `\nThis is a retry.\n${retryContext}\nFix the actual defect — do not just silence the check.` : ''}
 
-Make the code changes for this task only. Report back exactly what you changed and why, plus any assumptions you made.`
+Make the code changes for this task only. Report a summary of what you changed and why, the exact list of files you touched, and any assumptions you made.`
 }
 
 const results = []
@@ -129,11 +139,34 @@ for (const w of waveNumbers) {
   const waveTasks = wavesByNumber[w]
   const waveResults = await parallel(
     waveTasks.map(t => () =>
-      agent(implementPrompt(t, waveTasks.filter(x => x.id !== t.id), null), { phase: 'Implement', label: `${t.role}:${t.id}` })
+      agent(implementPrompt(t, waveTasks.filter(x => x.id !== t.id), null), { phase: 'Implement', label: `${t.role}:${t.id}`, schema: IMPLEMENT_SCHEMA })
         .then(output => ({ task: t, output }))
     )
   )
   results.push(...waveResults.filter(Boolean))
+
+  if (waveTasks.length > 1) {
+    const fileOwners = {}
+    for (const r of waveResults.filter(Boolean)) {
+      for (const f of r.output.filesChanged || []) {
+        ;(fileOwners[f] ||= []).push(r.task.id)
+      }
+    }
+    const conflictedIds = [...new Set(Object.values(fileOwners).filter(o => o.length > 1).flat())]
+    if (conflictedIds.length) {
+      log(`Wave ${w}: file overlap detected for task(s) ${conflictedIds.join(', ')} — re-running sequentially to reconcile`)
+      for (const id of conflictedIds) {
+        const t = waveTasks.find(x => x.id === id)
+        const overlappingFiles = Object.entries(fileOwners).filter(([, o]) => o.includes(id) && o.length > 1).map(([f]) => f)
+        const retryOutput = await agent(
+          implementPrompt(t, waveTasks.filter(x => x.id !== t.id), `A parallel teammate this wave also touched: ${overlappingFiles.join(', ')}. Re-inspect the current state of these files (another agent already edited them) and reconcile your change with what's actually there now — do not blindly re-apply your original diff.`),
+          { phase: 'Implement', label: `${t.role}:${t.id}:conflict-retry`, schema: IMPLEMENT_SCHEMA }
+        )
+        const idx = results.findIndex(x => x.task.id === t.id)
+        if (idx >= 0) results[idx] = { task: t, output: retryOutput }
+      }
+    }
+  }
 }
 
 phase('QA')
@@ -183,7 +216,7 @@ ${plan.tasks.map(t => `${t.id}: ${t.title} (${t.filesHint})`).join('\n')}
   const retryTasks = plan.tasks.filter(t => failedIds.includes(t.id))
   const retryResults = await parallel(
     retryTasks.map(t => () =>
-      agent(implementPrompt(t, retryTasks.filter(x => x.id !== t.id), retryContext), { phase: 'Implement', label: `retry:${t.id}` })
+      agent(implementPrompt(t, retryTasks.filter(x => x.id !== t.id), retryContext), { phase: 'Implement', label: `retry:${t.id}`, schema: IMPLEMENT_SCHEMA })
         .then(output => ({ task: t, output }))
     )
   )
@@ -206,7 +239,7 @@ Automated checks notes: ${autoQA ? autoQA.notes : 'n/a'}
 QA engineer notes: ${reasoningQA ? reasoningQA.notes : 'n/a'}
 
 Specialist output per task:
-${results.map(r => `--- ${r.task.id} (${r.task.role}) ---\n${r.output}`).join('\n\n')}
+${results.map(r => `--- ${r.task.id} (${r.task.role}) ---\n${r.output.summary}\nFiles changed: ${(r.output.filesChanged || []).join(', ') || 'none reported'}\nAssumptions: ${r.output.assumptions || 'none'}`).join('\n\n')}
 
 1. If Final QA status is PASS: open openspec/changes/${change}/tasks.md and flip "- [ ]" to "- [x]" for exactly the task lines carrying "_(Slice ${slice})_", appending a short outcome note in the same style/tone as the other completed tasks already in that file. Do not touch any other slice's lines.
 2. If Final QA status is FAIL: do NOT edit tasks.md.
