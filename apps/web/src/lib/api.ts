@@ -37,7 +37,7 @@ import type {
   UpdateSlackSettingsRequest,
 } from '@se/shared';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+const API_URL = import.meta.env?.VITE_API_URL ?? 'http://localhost:4000';
 
 const ACCESS_KEY = 'se.accessToken';
 const REFRESH_KEY = 'se.refreshToken';
