@@ -1,4 +1,39 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -fd*)",
+      "Bash(git clean -fdx*)",
+      "Bash(git commit --no-verify*)",
+      "Bash(git push --no-verify*)",
+      "Bash(git config --global*)",
+      "Bash(prisma migrate reset*)",
+      "Bash(pnpm --filter * prisma migrate reset*)",
+      "Bash(npx prisma migrate reset*)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf .)",
+      "Bash(rm -rf ./*)",
+      "Bash(psql *DROP TABLE*)",
+      "Bash(psql *DROP DATABASE*)",
+      "Bash(psql *TRUNCATE*)",
+      "Bash(prisma db execute*DROP TABLE*)",
+      "Bash(prisma db execute*DROP DATABASE*)",
+      "Bash(prisma db execute*TRUNCATE*)"
+    ],
+    "ask": [
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(pnpm add*)",
+      "Bash(pnpm remove*)",
+      "Bash(pnpm update*)",
+      "Bash(prisma migrate deploy*)",
+      "Bash(pnpm --filter * prisma migrate deploy*)"
+    ]
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
