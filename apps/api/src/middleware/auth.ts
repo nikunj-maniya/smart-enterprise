@@ -67,3 +67,11 @@ export function requireEnterpriseAdmin(req: Request, _res: Response, next: NextF
   }
   next();
 }
+
+/** Require the caller to hold the tenant's IT Admin role (it-fulfilment spec: fulfilment queue access). */
+export function requireItAdmin(req: Request, _res: Response, next: NextFunction) {
+  if (!req.user?.tenantId || !req.user.roles.includes(SystemRoleKey.ItAdmin)) {
+    return next(new HttpError(403, 'IT Admin access required'));
+  }
+  next();
+}

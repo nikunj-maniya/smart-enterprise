@@ -381,8 +381,51 @@ export const notificationSchema = z.discriminatedUnion('type', [
     read: z.boolean(),
     createdAt: z.string(),
   }),
+  /** To the requester — a co-approver decided but the request isn't final yet (parallel
+   *  approval: reject is always terminal, so this only ever fires for an interim approve). */
+  z.object({
+    id: z.string(),
+    type: z.literal('request_decision_update'),
+    payload: requestNotificationPayloadSchema.extend({ approverName: z.string(), decision: z.enum(['approved', 'rejected']) }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+  /** To a not-yet-decided approver — a peer in the same parallel stage just decided. */
+  z.object({
+    id: z.string(),
+    type: z.literal('approval_peer_decided'),
+    payload: requestNotificationPayloadSchema.extend({ approverName: z.string(), decision: z.enum(['approved', 'rejected']) }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
+  /** To the original (now-reassigned) approver and to the requester — the sweep auto-escalated
+   *  this approval stage (escalation spec: on approved leave, deactivated, or action-window timeout). */
+  z.object({
+    id: z.string(),
+    type: z.literal('approval_escalated'),
+    payload: requestNotificationPayloadSchema.extend({ cause: z.enum(['on_leave', 'inactive', 'timeout']) }),
+    read: z.boolean(),
+    createdAt: z.string(),
+  }),
 ]);
 export type NotificationDto = z.infer<typeof notificationSchema>;
+
+// ── Notifications list (notifications-inapp, recipient-scoped) ──
+export const notificationsQuerySchema = z.object({
+  tab: z.enum(['all', 'unread']).default('all'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type NotificationsQuery = z.infer<typeof notificationsQuerySchema>;
+
+export const notificationsResponseSchema = z.object({
+  rows: z.array(notificationSchema),
+  total: z.number(),
+  unreadCount: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type NotificationsResponse = z.infer<typeof notificationsResponseSchema>;
 
 // ── Enterprises (onboarded tenants) ─────────────────────────────
 export const enterpriseStatus = z.enum(['Active', 'Suspended']);
@@ -880,6 +923,45 @@ export const requestDtoSchema = z.object({
 });
 export type RequestDto = z.infer<typeof requestDtoSchema>;
 
+/** A `RequestApprover.decision`: `pending` until the approver acts. */
+export const approvalDecisionSchema = z.enum(['pending', 'approved', 'rejected']);
+export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
+
+/** One entry of a request's approval chain — shown alongside a queue card and in the shared
+ *  request-detail drawer. `escalatedFromName`/`escalationCause` are set only when the sweep
+ *  reassigned this stage (escalation spec's chain annotation). */
+export const approvalChainEntrySchema = z.object({
+  approverId: z.string(),
+  approverName: z.string(),
+  roleContext: z.string(),
+  decision: approvalDecisionSchema,
+  comment: z.string().nullable(),
+  escalatedFromName: z.string().nullable(),
+  escalationCause: z.enum(['on_leave', 'inactive', 'timeout']).nullable(),
+});
+export type ApprovalChainEntryDto = z.infer<typeof approvalChainEntrySchema>;
+
+/** GET /requests/:id — one request's full detail, rendered against its own pinned
+ *  definition version (not the tenant's current latest) so a republish never changes
+ *  how an existing request displays. Reachable by the requester or any snapshotted approver. */
+export const requestDetailDtoSchema = z.object({
+  id: z.string(),
+  formKey: z.string(),
+  formTitle: z.string(),
+  status: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+  createdAt: z.string(),
+  startDate: z.string().nullable(),
+  endDate: z.string().nullable(),
+  definition: formDefinitionDtoSchema,
+  requesterId: z.string(),
+  approvers: z.array(approvalChainEntrySchema),
+  /** Leave/WFH-only computed flags (leave-wfh-requests) — `null` for every other form. */
+  overBalance: z.boolean().nullable(),
+  specialConditionFlagged: z.boolean().nullable(),
+});
+export type RequestDetailDto = z.infer<typeof requestDetailDtoSchema>;
+
 /** Body for a status transition — moves a request along a transition declared in its form's status model. */
 export const transitionRequestSchema = z.object({
   toState: z.string().min(1),
@@ -887,9 +969,29 @@ export const transitionRequestSchema = z.object({
 });
 export type TransitionRequestInput = z.infer<typeof transitionRequestSchema>;
 
-/** A `RequestApprover.decision`: `pending` until the approver acts. */
-export const approvalDecisionSchema = z.enum(['pending', 'approved', 'rejected']);
-export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
+/** Body for a decision on a request the caller is a snapshotted approver for (approval-workflow).
+ *  `comment` is required when rejecting (enforced server-side, where the message can name it). */
+export const decisionRequestSchema = z.object({
+  decision: z.enum(['approved', 'rejected']),
+  comment: z.string().optional(),
+});
+export type DecisionRequestInput = z.infer<typeof decisionRequestSchema>;
+
+// ── Escalation matrix admin config (approval-workflow, Enterprise Admin only) ──
+export const escalationRuleDtoSchema = z.object({
+  id: z.string(),
+  fromContext: z.string(),
+  toRoleId: z.string(),
+  toRoleName: z.string(),
+  actionWindowHours: z.number().int(),
+});
+export type EscalationRuleDto = z.infer<typeof escalationRuleDtoSchema>;
+
+export const updateEscalationRuleSchema = z.object({
+  toRoleId: z.string().min(1),
+  actionWindowHours: z.number().int().min(1).max(720),
+});
+export type UpdateEscalationRuleInput = z.infer<typeof updateEscalationRuleSchema>;
 
 // ── My Requests (form-engine, tenant-scoped) — the requester's own request list ──
 export const myRequestsQuerySchema = z.object({
@@ -921,6 +1023,36 @@ export const myRequestsResponseSchema = z.object({
 });
 export type MyRequestsResponse = z.infer<typeof myRequestsResponseSchema>;
 
+// ── Leave Policy & Balances (leave-wfh-requests, tenant-scoped) ──
+/** One configured leave type (Leave Policy & Quotas page). `carryForward`/`halfDayAllowed` are
+ *  policy toggles stored alongside the type; unpaid types (`isPaid: false`, i.e. LWP) carry no
+ *  balance and are exempt from deduction. */
+export const leaveTypeDtoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  quota: z.number(),
+  isPaid: z.boolean(),
+  carryForward: z.boolean(),
+  halfDayAllowed: z.boolean(),
+});
+export type LeaveTypeDto = z.infer<typeof leaveTypeDtoSchema>;
+
+export const updateLeaveTypeRequestSchema = z.object({
+  quota: z.number().min(0),
+  carryForward: z.boolean(),
+  halfDayAllowed: z.boolean(),
+});
+export type UpdateLeaveTypeRequest = z.infer<typeof updateLeaveTypeRequestSchema>;
+
+/** One employee's balance for one leave type, for the My Requests balance cards. */
+export const leaveBalanceDtoSchema = z.object({
+  leaveTypeId: z.string(),
+  leaveTypeName: z.string(),
+  used: z.number(),
+  total: z.number(),
+});
+export type LeaveBalanceDto = z.infer<typeof leaveBalanceDtoSchema>;
+
 // ── Approvals Queue (approval-workflow, tenant-scoped) — an approver's own queue ──
 export const approvalQueueTabSchema = z.enum(['pending', 'decided']);
 export type ApprovalQueueTab = z.infer<typeof approvalQueueTabSchema>;
@@ -931,16 +1063,6 @@ export const approvalQueueQuerySchema = z.object({
   roleContext: z.string().optional(),
 });
 export type ApprovalQueueQuery = z.infer<typeof approvalQueueQuerySchema>;
-
-/** One entry of a request's approval chain, as shown alongside a queue card. */
-export const approvalChainEntrySchema = z.object({
-  approverId: z.string(),
-  approverName: z.string(),
-  roleContext: z.string(),
-  decision: approvalDecisionSchema,
-  comment: z.string().nullable(),
-});
-export type ApprovalChainEntryDto = z.infer<typeof approvalChainEntrySchema>;
 
 /** One card on the Approvals Queue page — a request awaiting or already decided by the caller. */
 export const approvalQueueItemSchema = z.object({
@@ -957,6 +1079,9 @@ export const approvalQueueItemSchema = z.object({
   /** The caller's own decision on this request. */
   myDecision: approvalDecisionSchema,
   chain: z.array(approvalChainEntrySchema),
+  /** Leave/WFH-only computed flags (leave-wfh-requests) — `null` for every other form. */
+  overBalance: z.boolean().nullable(),
+  specialConditionFlagged: z.boolean().nullable(),
 });
 export type ApprovalQueueItemDto = z.infer<typeof approvalQueueItemSchema>;
 
@@ -1007,3 +1132,302 @@ export const updateProfileRequestSchema = z.object({
   location: z.string().nullable().optional(),
 });
 export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;
+
+// ── Front Desk (visitor-management, tenant-scoped) ──
+/** One visitor registration on today's Front Desk view. */
+export const frontDeskVisitorDtoSchema = z.object({
+  requestId: z.string(),
+  visitorName: z.string(),
+  mobile: z.string(),
+  hostName: z.string(),
+  purpose: z.string(),
+  visitDatetime: z.string().nullable(),
+  outTime: z.string().nullable(),
+  laptopDetails: z.string().nullable(),
+  status: z.string(),
+  checkInAt: z.string().nullable(),
+  checkOutAt: z.string().nullable(),
+});
+export type FrontDeskVisitorDto = z.infer<typeof frontDeskVisitorDtoSchema>;
+
+/** GET /front-desk/today — today's visitors (tenant timezone), split by lifecycle bucket. */
+export const frontDeskTodayResponseSchema = z.object({
+  expected: z.array(frontDeskVisitorDtoSchema),
+  onSite: z.array(frontDeskVisitorDtoSchema),
+  checkedOut: z.array(frontDeskVisitorDtoSchema),
+});
+export type FrontDeskTodayResponse = z.infer<typeof frontDeskTodayResponseSchema>;
+
+// ── Item Catalog (it-requests, tenant-scoped, Enterprise Admin CRUD) ──
+export const itemCatalogTypeSchema = z.enum(['software', 'hardware']);
+export type ItemCatalogType = z.infer<typeof itemCatalogTypeSchema>;
+
+export const itemCatalogDtoSchema = z.object({
+  id: z.string(),
+  type: itemCatalogTypeSchema,
+  name: z.string(),
+  archived: z.boolean(),
+  /** Blocks hard delete (item-catalog spec) — true when any request has ever named this item. */
+  referenced: z.boolean(),
+});
+export type ItemCatalogDto = z.infer<typeof itemCatalogDtoSchema>;
+
+export const createItemCatalogRequestSchema = z.object({
+  type: itemCatalogTypeSchema,
+  name: z.string().min(1, 'Name is required'),
+});
+export type CreateItemCatalogRequest = z.infer<typeof createItemCatalogRequestSchema>;
+
+export const updateItemCatalogRequestSchema = z.object({
+  name: z.string().min(1, 'Name is required').optional(),
+  archived: z.boolean().optional(),
+});
+export type UpdateItemCatalogRequest = z.infer<typeof updateItemCatalogRequestSchema>;
+
+// ── IT Fulfilment Queue (it-requests, IT Admin only) ──
+export const fulfilmentQueueTabSchema = z.enum(['open', 'fulfilled']);
+export type FulfilmentQueueTab = z.infer<typeof fulfilmentQueueTabSchema>;
+
+export const fulfilmentQueueItemSchema = z.object({
+  requestId: z.string(),
+  requesterName: z.string(),
+  departmentId: z.string().nullable(),
+  category: z.string(), // 'Software' | 'Hardware', from the submitted access_type
+  items: z.array(z.string()),
+  impact: z.string().nullable(),
+  status: z.string(),
+  assigneeId: z.string().nullable(),
+  assigneeName: z.string().nullable(),
+  approvedAt: z.string().nullable(),
+  fulfilledAt: z.string().nullable(),
+});
+export type FulfilmentQueueItemDto = z.infer<typeof fulfilmentQueueItemSchema>;
+
+export const fulfilmentQueueResponseSchema = z.object({
+  rows: z.array(fulfilmentQueueItemSchema),
+  queuedCount: z.number(),
+  inProgressCount: z.number(),
+  fulfilledCount: z.number(),
+});
+export type FulfilmentQueueResponse = z.infer<typeof fulfilmentQueueResponseSchema>;
+
+// ── Absence Visibility & Calendar (absence-visibility, tenant-scoped, PRD §11A) ──
+export const absenceTypeSchema = z.enum(['leave', 'wfh']);
+export type AbsenceType = z.infer<typeof absenceTypeSchema>;
+
+export const absenceQuerySchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  projectId: z.string().optional(),
+  departmentId: z.string().optional(),
+  type: absenceTypeSchema.optional(),
+  personId: z.string().optional(),
+});
+export type AbsenceQuery = z.infer<typeof absenceQuerySchema>;
+
+/** One approved Leave/WFH absence, shaped by the viewer's §11A tier — `reason` is present only
+ *  for HR viewers; it is omitted (not merely null) from every other role's response. */
+export const absenceEntryDtoSchema = z.object({
+  requestId: z.string(),
+  personId: z.string(),
+  personName: z.string(),
+  departmentId: z.string().nullable(),
+  departmentName: z.string().nullable(),
+  projectId: z.string().nullable(),
+  projectName: z.string().nullable(),
+  type: absenceTypeSchema,
+  startDate: z.string(),
+  endDate: z.string(),
+  halfDayCount: z.number().nullable(),
+  reason: z.string().nullable().optional(),
+});
+export type AbsenceEntryDto = z.infer<typeof absenceEntryDtoSchema>;
+
+export const absenceVisibilityScopeSchema = z.enum(['hr', 'management', 'pm-tl']);
+export type AbsenceVisibilityScope = z.infer<typeof absenceVisibilityScopeSchema>;
+
+export const absenceRangeResponseSchema = z.object({
+  rows: z.array(absenceEntryDtoSchema),
+  scope: absenceVisibilityScopeSchema,
+});
+export type AbsenceRangeResponse = z.infer<typeof absenceRangeResponseSchema>;
+
+export const overCapQuerySchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  projectId: z.string().optional(),
+});
+export type OverCapQuery = z.infer<typeof overCapQuerySchema>;
+
+export const overCapDayDtoSchema = z.object({
+  date: z.string(),
+  count: z.number(),
+  cap: z.number(),
+  people: z.array(z.object({ personId: z.string(), personName: z.string() })),
+});
+export type OverCapDayDto = z.infer<typeof overCapDayDtoSchema>;
+
+export const overCapResponseSchema = z.object({
+  cap: z.number(),
+  days: z.array(overCapDayDtoSchema),
+});
+export type OverCapResponse = z.infer<typeof overCapResponseSchema>;
+
+/** The tenant's configured concurrent-absence cap (Leave Policy page), used by the Admin
+ *  Absence Calendar's over-cap warning panel. */
+export const absenceCapDtoSchema = z.object({ cap: z.number() });
+export type AbsenceCapDto = z.infer<typeof absenceCapDtoSchema>;
+
+export const updateAbsenceCapRequestSchema = z.object({ cap: z.number().int().min(1) });
+export type UpdateAbsenceCapRequest = z.infer<typeof updateAbsenceCapRequestSchema>;
+
+// ── Global Search (global-search, role- and tenant-scoped) ──
+export const searchResultTypeSchema = z.enum([
+  'request',
+  'user',
+  'project',
+  'department',
+  'enterprise',
+  'registration',
+  'platform-user',
+]);
+export type SearchResultType = z.infer<typeof searchResultTypeSchema>;
+
+export const searchResultItemSchema = z.object({
+  type: searchResultTypeSchema,
+  id: z.string(),
+  title: z.string(),
+  subtitle: z.string().nullable(),
+});
+export type SearchResultItem = z.infer<typeof searchResultItemSchema>;
+
+export const searchResultGroupSchema = z.object({
+  type: searchResultTypeSchema,
+  label: z.string(),
+  items: z.array(searchResultItemSchema),
+});
+export type SearchResultGroup = z.infer<typeof searchResultGroupSchema>;
+
+/** `q` is validated non-empty here; the overlay itself enforces the 2-char minimum before calling. */
+export const globalSearchQuerySchema = z.object({ q: z.string().min(1) });
+export type GlobalSearchQuery = z.infer<typeof globalSearchQuerySchema>;
+
+export const globalSearchResponseSchema = z.object({ groups: z.array(searchResultGroupSchema) });
+export type GlobalSearchResponse = z.infer<typeof globalSearchResponseSchema>;
+
+// ── Slack Integration (slack-integration, tenant-scoped, Enterprise Admin only, PRD §11) ──
+export const slackConfigStatusSchema = z.enum(['disconnected', 'connected', 'error']);
+export type SlackConfigStatus = z.infer<typeof slackConfigStatusSchema>;
+
+/** Never carries credential material — connection status only. */
+export const slackConfigDtoSchema = z.object({
+  status: slackConfigStatusSchema,
+  workspaceName: z.string().nullable(),
+  defaultChannel: z.string().nullable(),
+  notifyApproversOnNewRequest: z.boolean(),
+  notifyRequesterOnDecision: z.boolean(),
+  notifyRequesterOnStatusChange: z.boolean(),
+  digestEnabled: z.boolean(),
+  digestChannel: z.string().nullable(),
+  digestTime: z.string().nullable(),
+  reminderEnabled: z.boolean(),
+  lastErrorMessage: z.string().nullable(),
+});
+export type SlackConfigDto = z.infer<typeof slackConfigDtoSchema>;
+
+export const connectSlackRequestSchema = z.object({
+  botToken: z.string().min(1, 'Bot token is required'),
+  signingSecret: z.string().min(1, 'Signing secret is required'),
+  defaultChannel: z.string().min(1, 'Default channel is required'),
+});
+export type ConnectSlackRequest = z.infer<typeof connectSlackRequestSchema>;
+
+export const updateSlackSettingsRequestSchema = z.object({
+  defaultChannel: z.string().min(1).optional(),
+  notifyApproversOnNewRequest: z.boolean(),
+  notifyRequesterOnDecision: z.boolean(),
+  notifyRequesterOnStatusChange: z.boolean(),
+  digestEnabled: z.boolean(),
+  digestChannel: z.string().nullable().optional(),
+  digestTime: z.string().nullable().optional(),
+  reminderEnabled: z.boolean(),
+});
+export type UpdateSlackSettingsRequest = z.infer<typeof updateSlackSettingsRequestSchema>;
+
+// ── Notification Preferences (reporting-and-polish, per-user, within tenant policy) ──
+/** Every tenant-user-facing notification type, its mandatory-ness (tenant policy — cannot be
+ *  muted on any channel), and a human label for the Profile page. `enterprise_registered` is
+ *  System-Admin-only and not part of this per-user catalog. */
+export const NOTIFICATION_TYPE_CATALOG: { type: string; label: string; mandatory: boolean }[] = [
+  { type: 'request_needs_approval', label: 'A request needs your approval', mandatory: true },
+  { type: 'request_approved', label: 'Your request was approved', mandatory: false },
+  { type: 'request_rejected', label: 'Your request was rejected', mandatory: false },
+  { type: 'request_status_changed', label: 'Your request status changed', mandatory: false },
+  { type: 'request_decision_update', label: 'A co-approver decided on your request', mandatory: false },
+  { type: 'approval_peer_decided', label: 'A peer approver decided', mandatory: false },
+  { type: 'approval_reminder', label: 'Reminder: requests awaiting your approval', mandatory: false },
+  { type: 'approval_escalated', label: 'An approval was escalated to you', mandatory: false },
+];
+
+export const notificationChannelSchema = z.enum(['inApp', 'slack']);
+export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
+
+export const notificationPreferenceRowSchema = z.object({
+  type: z.string(),
+  label: z.string(),
+  mandatory: z.boolean(),
+  inApp: z.boolean(),
+  slack: z.boolean(),
+});
+export type NotificationPreferenceRow = z.infer<typeof notificationPreferenceRowSchema>;
+
+export const notificationPreferencesResponseSchema = z.object({ rows: z.array(notificationPreferenceRowSchema) });
+export type NotificationPreferencesResponse = z.infer<typeof notificationPreferencesResponseSchema>;
+
+export const updateNotificationPreferenceRequestSchema = z.object({
+  type: z.string().min(1),
+  channel: notificationChannelSchema,
+  enabled: z.boolean(),
+});
+export type UpdateNotificationPreferenceRequest = z.infer<typeof updateNotificationPreferenceRequestSchema>;
+
+// ── Reporting & Dashboards (reporting-and-polish, role- and tenant-scoped) ──
+export const reportRangeQuerySchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  projectId: z.string().optional(),
+});
+export type ReportRangeQuery = z.infer<typeof reportRangeQuerySchema>;
+
+export const requestVolumeRowSchema = z.object({
+  formKey: z.string(),
+  formTitle: z.string(),
+  status: z.string(),
+  count: z.number(),
+});
+export type RequestVolumeRow = z.infer<typeof requestVolumeRowSchema>;
+
+export const absenceTrendPointSchema = z.object({ date: z.string(), count: z.number() });
+export type AbsenceTrendPoint = z.infer<typeof absenceTrendPointSchema>;
+
+/** `scope` is the same §11A tier `GET /absences` resolves — dashboards inherit it rather than
+ *  defining a parallel permission model (design.md). */
+export const reportSummaryResponseSchema = z.object({
+  scope: absenceVisibilityScopeSchema,
+  requestVolumes: z.array(requestVolumeRowSchema),
+  avgApprovalTurnaroundHours: z.number().nullable(),
+  absenceTrend: z.array(absenceTrendPointSchema),
+});
+export type ReportSummaryResponse = z.infer<typeof reportSummaryResponseSchema>;
+
+// ── Visitor Signatures (reporting-and-polish, Front Desk check-in) ──
+/** `signature` is a data: URL (canvas `toDataURL()` output) — decoded and written to object
+ *  storage server-side; never persisted as-is. */
+export const checkInWithSignatureRequestSchema = z.object({
+  signature: z.string().min(1),
+  consent: z.boolean(),
+});
+export type CheckInWithSignatureRequest = z.infer<typeof checkInWithSignatureRequestSchema>;
+
+export const signedUrlResponseSchema = z.object({ url: z.string() });
+export type SignedUrlResponse = z.infer<typeof signedUrlResponseSchema>;

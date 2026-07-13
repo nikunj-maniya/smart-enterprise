@@ -65,6 +65,9 @@ model Tenant {
   auditLogs   AuditLog[]
   registration EnterpriseRegistration?
   registrationLink RegistrationLink?
+  escalationRules EscalationRule[]
+  itemCatalog ItemCatalog[]
+  slackConfig SlackConfig?
 }
 
 // Shareable employee self-registration link — at most one active link per tenant.
@@ -114,6 +117,10 @@ model User {
   phone              String?
   jobTitle           String?
   location           String?
+  // Per-user, per-channel notification preferences (reporting-and-polish): a sparse map of
+  // `{ [notificationType]: { inApp?: boolean, slack?: boolean } }` — an absent type/channel
+  // defaults to enabled; mandatory types (NOTIFICATION_TYPE_CATALOG) ignore this entirely.
+  notificationPreferences Json?
   createdAt          DateTime   @default(now())
 
   tenant            Tenant?              @relation(fields: [tenantId], references: [id])
@@ -155,6 +162,7 @@ model Role {
 
   tenant Tenant     @relation(fields: [tenantId], references: [id])
   users  UserRole[]
+  escalationTargetOf EscalationRule[]
 
   @@unique([tenantId, key])
   @@index([tenantId])
@@ -343,6 +351,15 @@ model Request {
   departmentId  String?
   projectId     String?
 
+  // Leave/WFH flags computed server-side at submission (leave-wfh-requests) — never
+  // client-supplied, never gate approval; surfaced to approvers/HR as badges.
+  overBalance             Boolean?
+  specialConditionFlagged Boolean?
+
+  // IT fulfilment (it-requests): claim-based assignment — first IT Admin to claim owns it;
+  // a promoted column since the Fulfilment Queue queries/filters on it constantly.
+  itAssigneeId String?
+
   createdAt DateTime @default(now())
 
   tenant        Tenant                 @relation(fields: [tenantId], references: [id])
@@ -357,6 +374,22 @@ model Request {
   @@index([requesterId])
 }
 
+// Per-tenant software/hardware item master data (it-requests) — pickers on the IT form resolve
+// their options from here at read/submit time, never from the form's own metadata, so an admin
+// edit applies instantly without a republish. Archived (not deleted) once referenced by a request.
+model ItemCatalog {
+  id       String  @id @default(cuid())
+  tenantId String
+  type     String // 'software' | 'hardware'
+  name     String
+  archived Boolean @default(false)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, type, name])
+  @@index([tenantId, type])
+}
+
 model RequestApprover {
   id          String    @id @default(cuid())
   requestId   String
@@ -366,9 +399,34 @@ model RequestApprover {
   decidedAt   DateTime?
   comment     String?
 
+  // Set when the sweep reassigns this row per the escalation matrix (design.md: reassign
+  // the existing row rather than add a second one, so "all must approve" arithmetic stays trivial).
+  escalatedFromId String? // the approverId this row held before reassignment
+  escalationCause String? // 'on_leave' | 'inactive' | 'timeout'
+  escalatedAt     DateTime?
+
   request Request @relation(fields: [requestId], references: [id])
 
   @@index([approverId, decision])
+}
+
+// Tenant-scoped escalation matrix (escalation-workflow spec): maps a `RequestApprover.roleContext`
+// value to the Role that stage escalates to, both for self-approval prevention at submission and
+// the sweep's stalled/unavailable-approver escalation. `fromContext` matches `roleContext` as
+// produced by `resolveApprovers`/`roleContextFor` — a `Role.key` when the field is role-restricted,
+// otherwise the field's own key (e.g. an unrestricted Tech Lead picker's context is `tech_lead`).
+model EscalationRule {
+  id                String @id @default(cuid())
+  tenantId          String
+  fromContext       String
+  toRoleId          String
+  actionWindowHours Int    @default(48)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  toRole Role   @relation(fields: [toRoleId], references: [id])
+
+  @@unique([tenantId, fromContext])
+  @@index([tenantId])
 }
 
 model RequestStatusHistory {
@@ -389,7 +447,10 @@ model Visitor {
   checkInAt   DateTime?
   checkOutAt  DateTime?
   consent     Boolean   @default(false)
-  // signature deferred to a later phase (object storage)
+  // reporting-and-polish: signature captured at check-in, stored in MinIO — this column holds
+  // only the object key (never a URL); retrieval is always through a fresh, short-lived signed
+  // GET URL (lib/object-storage.ts), never a public path.
+  signatureObjectKey String?
 
   request Request @relation(fields: [requestId], references: [id])
 }
@@ -434,4 +495,38 @@ model PlatformSettings {
   notifyOnNewRegistration         Boolean  @default(true)
   updatedAt                       DateTime @updatedAt
   updatedBy                       String?
+}
+
+// ── Slack Integration (slack-integration, tenant-scoped, PRD §11) ──
+// `botTokenEncrypted`/`signingSecretEncrypted` are AES-256-GCM ciphertext (see lib/crypto.ts) —
+// never plaintext, never returned by any API. `slackTeamId` (from `auth.test` on connect) lets
+// the interaction webhook route an unauthenticated payload to the right tenant's signing secret
+// before verifying it.
+model SlackConfig {
+  id                    String   @id @default(cuid())
+  tenantId              String   @unique
+  status                String   @default("disconnected") // disconnected | connected | error
+  workspaceName         String?
+  slackTeamId           String?
+  defaultChannel        String?
+  botTokenEncrypted     String?
+  signingSecretEncrypted String?
+  lastErrorMessage      String?
+
+  notifyApproversOnNewRequest   Boolean @default(true)
+  notifyRequesterOnDecision     Boolean @default(true)
+  notifyRequesterOnStatusChange Boolean @default(true)
+
+  digestEnabled      Boolean @default(false)
+  digestChannel      String?
+  digestTime         String? // "HH:mm", evaluated in Asia/Kolkata
+  lastDigestSentDate String? // "YYYY-MM-DD" — guards against sending twice in one day
+
+  reminderEnabled Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([slackTeamId])
 }

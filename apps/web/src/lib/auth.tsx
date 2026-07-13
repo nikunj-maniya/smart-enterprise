@@ -1,6 +1,7 @@
 import * as React from 'react';
 import type { AuthUser, LoginResponse } from '@se/shared';
 import { apiFetch, tokenStore } from './api';
+import { disconnectSocket } from './socket';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -57,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = React.useCallback(() => {
     tokenStore.clear();
+    disconnectSocket();
     setUser(null);
   }, []);
 

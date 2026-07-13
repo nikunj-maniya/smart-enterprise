@@ -15,6 +15,7 @@ export const FIELD_TYPES = [
   'datetime',
   'time',
   'daterange',
+  'date-multi',
   'single-select',
   'multi-select',
   'radio',

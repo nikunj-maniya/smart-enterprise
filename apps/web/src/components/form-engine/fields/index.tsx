@@ -3,6 +3,7 @@ import type { FieldType } from '@se/shared';
 import { CheckboxField } from './CheckboxField';
 import { CheckboxGroupField } from './CheckboxGroupField';
 import { DateField } from './DateField';
+import { DateMultiField } from './DateMultiField';
 import { DateRangeField } from './DateRangeField';
 import { DateTimeField } from './DateTimeField';
 import { MultiSelectField } from './MultiSelectField';
@@ -21,6 +22,7 @@ export {
   CheckboxField,
   CheckboxGroupField,
   DateField,
+  DateMultiField,
   DateRangeField,
   DateTimeField,
   MultiSelectField,
@@ -45,6 +47,7 @@ export const FIELD_COMPONENTS: Partial<Record<FieldType, ComponentType<FieldComp
   textarea: TextareaField,
   number: NumberField,
   date: DateField,
+  'date-multi': DateMultiField,
   datetime: DateTimeField,
   time: TimeField,
   daterange: DateRangeField,

@@ -8,3 +8,5 @@ export const profileRouter: Router = Router();
 profileRouter.use(requireAuth);
 profileRouter.get('/', profileController.get);
 profileRouter.put('/', profileController.update);
+profileRouter.get('/notification-preferences', profileController.getNotificationPreferences);
+profileRouter.put('/notification-preferences', profileController.updateNotificationPreference);

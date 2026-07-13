@@ -1,38 +1,15 @@
 import * as React from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Check, CheckCircle, X, XCircle } from 'lucide-react';
-import { SYSTEM_ROLE_NAMES, type ApprovalQueueItemDto, type ApprovalQueueTab, type SystemRoleKey } from '@se/shared';
+import type { ApprovalQueueItemDto, ApprovalQueueTab } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { Toast, useToast } from '@/components/ui/toast';
-import { ApiError, listApprovalQueue, transitionRequest } from '@/lib/api';
+import { ApiError, decideOnRequest, listApprovalQueue } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { dateRange, EmptyState, ErrorState, InitialsAvatar, requestTypeMeta, TypeTile } from './shared';
-
-/** An approver's own decision, or the special "you" chain entry, rendered as a small dot badge. */
-const DECISION_META: Record<'pending' | 'approved' | 'rejected', { label: string; bg: string; fg: string }> = {
-  pending: { label: 'Pending', bg: 'rgb(255,247,237)', fg: 'rgb(204,78,0)' },
-  approved: { label: 'Approved', bg: 'rgb(233,246,233)', fg: 'rgb(33,131,88)' },
-  rejected: { label: 'Rejected', bg: 'rgb(254,235,236)', fg: 'rgb(206,44,49)' },
-};
-
-function DecisionBadge({ decision, label }: { decision: 'pending' | 'approved' | 'rejected'; label?: string }) {
-  const c = DECISION_META[decision];
-  return (
-    <span
-      className="inline-flex items-center gap-[6px] rounded-full px-[10px] py-1 text-xs font-medium"
-      style={{ background: c.bg, color: c.fg }}
-    >
-      <span className="h-[6px] w-[6px] flex-none rounded-full" style={{ background: c.fg }} />
-      {label ?? c.label}
-    </span>
-  );
-}
-
-function roleContextLabel(roleContext: string): string {
-  return SYSTEM_ROLE_NAMES[roleContext as SystemRoleKey] ?? roleContext;
-}
+import { DecisionBadge, dateRange, EmptyState, ErrorState, InitialsAvatar, requestTypeMeta, roleContextLabel, TypeTile } from './shared';
+import { RequestDetailDrawer } from './RequestDetailDrawer';
 
 /**
  * Approver's queue (form-builder Slice 5, PRD §16): requests routed to the caller, tabbed by
@@ -52,6 +29,7 @@ export default function ApprovalsQueue() {
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [actionErrors, setActionErrors] = React.useState<Record<string, string>>({});
   const [highlightId, setHighlightId] = React.useState<string | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = React.useState<string | null>(null);
   const rowRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const [searchParams, setSearchParams] = useSearchParams();
   const { message, show } = useToast();
@@ -100,8 +78,10 @@ export default function ApprovalsQueue() {
     setBusyId(row.requestId);
     setActionErrors((prev) => ({ ...prev, [row.requestId]: '' }));
     try {
-      await transitionRequest(row.requestId, { toState: 'Approved' });
-      show('Request approved.');
+      // Parallel approval: this only finalizes the request once every snapshotted approver has
+      // approved (`decideOnRequest`'s outcome evaluation) — the response's status tells us which.
+      const updated = await decideOnRequest(row.requestId, { decision: 'approved' });
+      show(updated.status === 'Approved' ? 'Request approved.' : 'Your approval was recorded — awaiting other approvers.');
       load();
     } catch (err) {
       setActionErrors((prev) => ({
@@ -203,8 +183,13 @@ export default function ApprovalsQueue() {
               >
 
                 <div className="flex items-start gap-4">
-                  <TypeTile formKey={row.formKey} formTitle={row.formTitle} size={44} />
-                  <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRequestId(row.requestId)}
+                    className="flex min-w-0 flex-1 items-start gap-4 text-left"
+                  >
+                    <TypeTile formKey={row.formKey} formTitle={row.formTitle} size={44} />
+                    <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-2">
                       <span className="text-[16px] font-bold text-ink-900">{row.requesterName}</span>
                       {row.requesterJobTitle && <span className="text-[13px] text-ink-400">· {row.requesterJobTitle}</span>}
@@ -243,7 +228,8 @@ export default function ApprovalsQueue() {
                         {actionErrors[row.requestId]}
                       </div>
                     )}
-                  </div>
+                    </div>
+                  </button>
 
                   {tab === 'pending' ? (
                     <div className="flex w-[140px] flex-none flex-col gap-[9px]">
@@ -296,6 +282,16 @@ export default function ApprovalsQueue() {
           }}
         />
       )}
+      {selectedRequestId && (
+        <RequestDetailDrawer
+          requestId={selectedRequestId}
+          onClose={() => setSelectedRequestId(null)}
+          onWithdrawn={() => {
+            setSelectedRequestId(null);
+            load();
+          }}
+        />
+      )}
       <Toast message={message} />
     </>
   );
@@ -322,7 +318,7 @@ function ApproverRejectModal({
     setSubmitting(true);
     setError(null);
     try {
-      await transitionRequest(row.requestId, { toState: 'Rejected', note: reason.trim() });
+      await decideOnRequest(row.requestId, { decision: 'rejected', comment: reason.trim() });
       onRejected();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to reject this request.');

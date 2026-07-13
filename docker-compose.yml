@@ -25,6 +25,23 @@ services:
       timeout: 5s
       retries: 5
 
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: smart
+      MINIO_ROOT_PASSWORD: smartminio
+    command: server /data --console-address ":9090"
+    ports:
+      - '9500:9000'
+      - '9501:9090'
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
@@ -35,12 +52,18 @@ services:
       REDIS_URL: redis://redis:6379
       SYSTEM_ADMIN_EMAIL: systemadmin@smartenterprise.com
       SYSTEM_ADMIN_PASSWORD: Smart@123
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: smart
+      MINIO_SECRET_KEY: smartminio
     ports:
       - '4000:4000'
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   web:
@@ -56,3 +79,4 @@ services:
 
 volumes:
   pgdata:
+  miniodata:

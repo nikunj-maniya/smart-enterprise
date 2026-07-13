@@ -1,13 +1,40 @@
 import type {
+  AbsenceCapDto,
+  AbsenceQuery,
+  AbsenceRangeResponse,
   ApprovalQueueResponse,
   ApprovalQueueTab,
+  CheckInWithSignatureRequest,
+  CreateItemCatalogRequest,
+  DecisionRequestInput,
   DirectoryProjectsResponse,
   DirectoryUsersResponse,
   FormDefinitionDto,
   FormDefinitionSummaryDto,
+  FrontDeskTodayResponse,
+  FulfilmentQueueResponse,
+  FulfilmentQueueTab,
+  GlobalSearchResponse,
+  ItemCatalogDto,
+  LeaveBalanceDto,
+  LeaveTypeDto,
   MyRequestsResponse,
+  NotificationPreferencesResponse,
+  OverCapQuery,
+  OverCapResponse,
+  ConnectSlackRequest,
+  ReportRangeQuery,
+  ReportSummaryResponse,
+  RequestDetailDto,
   RequestDto,
+  SignedUrlResponse,
+  SlackConfigDto,
   TransitionRequestInput,
+  UpdateAbsenceCapRequest,
+  UpdateItemCatalogRequest,
+  UpdateLeaveTypeRequest,
+  UpdateNotificationPreferenceRequest,
+  UpdateSlackSettingsRequest,
 } from '@se/shared';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
@@ -108,6 +135,11 @@ export function listMyRequests(query: { page?: number; pageSize?: number; status
   return apiFetch<MyRequestsResponse>(`/requests?${params.toString()}`);
 }
 
+/** `GET /requests/:id` — one of the caller's own requests, rendered against its own pinned form definition version. */
+export function getRequestDetail(requestId: string) {
+  return apiFetch<RequestDetailDto>(`/requests/${requestId}`);
+}
+
 /** `GET /requests/approvals` — the caller's approver queue, tabbed by their own decision. */
 export function listApprovalQueue(query: { tab: ApprovalQueueTab; roleContext?: string }) {
   const params = new URLSearchParams({ tab: query.tab });
@@ -115,10 +147,200 @@ export function listApprovalQueue(query: { tab: ApprovalQueueTab; roleContext?: 
   return apiFetch<ApprovalQueueResponse>(`/requests/approvals?${params.toString()}`);
 }
 
-/** `POST /requests/:id/transitions` — move a request along a status-model transition (approve, reject, withdraw, …). */
+/** `POST /requests/:id/transitions` — move a request along a status-model transition (withdraw, cancel, …). Not for Approve/Reject — use `decideOnRequest`. */
 export function transitionRequest(requestId: string, body: TransitionRequestInput) {
   return apiFetch<RequestDto>(`/requests/${requestId}/transitions`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+/** `POST /requests/:id/decisions` — record the caller's own Approve/Reject as a snapshotted approver. */
+export function decideOnRequest(requestId: string, body: DecisionRequestInput) {
+  return apiFetch<RequestDto>(`/requests/${requestId}/decisions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `GET /leave-types` (Enterprise Admin only) — the tenant's configured leave types (Leave Policy & Quotas page). */
+export function listLeaveTypes() {
+  return apiFetch<LeaveTypeDto[]>('/leave-types');
+}
+
+/** `PUT /leave-types/:id` (Enterprise Admin only) — update a leave type's quota/carry-forward/half-day policy. */
+export function updateLeaveType(id: string, body: UpdateLeaveTypeRequest) {
+  return apiFetch<LeaveTypeDto>(`/leave-types/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `GET /leave-balances/me` — the caller's own paid leave-type balances (My Requests balance cards). */
+export function listMyLeaveBalances() {
+  return apiFetch<LeaveBalanceDto[]>('/leave-balances/me');
+}
+
+/** `GET /front-desk/today` (Enterprise Admin / HR Head only) — today's visitors, split by lifecycle bucket. */
+export function getFrontDeskToday() {
+  return apiFetch<FrontDeskTodayResponse>('/front-desk/today');
+}
+
+/** `GET /item-catalog` (Enterprise Admin only) — the tenant's software + hardware catalogs, including archived items. */
+export function listItemCatalog() {
+  return apiFetch<ItemCatalogDto[]>('/item-catalog');
+}
+
+/** `POST /item-catalog` (Enterprise Admin only) — add a new catalog item. */
+export function createItemCatalog(body: CreateItemCatalogRequest) {
+  return apiFetch<ItemCatalogDto>('/item-catalog', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `PUT /item-catalog/:id` (Enterprise Admin only) — rename and/or archive/unarchive an item. */
+export function updateItemCatalog(id: string, body: UpdateItemCatalogRequest) {
+  return apiFetch<ItemCatalogDto>(`/item-catalog/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `DELETE /item-catalog/:id` (Enterprise Admin only) — refused (409) if any request has ever named this item. */
+export function deleteItemCatalog(id: string) {
+  return apiFetch<void>(`/item-catalog/${id}`, { method: 'DELETE' });
+}
+
+/** `GET /requests/fulfilment-queue` (IT Admin only) — the IT fulfilment queue, tabbed open/fulfilled. */
+export function getFulfilmentQueue(tab: FulfilmentQueueTab) {
+  return apiFetch<FulfilmentQueueResponse>(`/requests/fulfilment-queue?tab=${tab}`);
+}
+
+/** `POST /requests/:id/claim` (IT Admin only) — claim a queued request for fulfilment. */
+export function claimFulfilmentRequest(requestId: string) {
+  return apiFetch<void>(`/requests/${requestId}/claim`, { method: 'POST' });
+}
+
+/** `GET /absences` (HR Head / Enterprise Admin / PM / Tech Lead) — approved Leave/WFH absences
+ *  overlapping the given range, scoped and field-shaped per the caller's §11A visibility tier. */
+export function listAbsences(query: AbsenceQuery) {
+  const params = new URLSearchParams();
+  params.set('from', query.from);
+  params.set('to', query.to);
+  if (query.projectId) params.set('projectId', query.projectId);
+  if (query.departmentId) params.set('departmentId', query.departmentId);
+  if (query.type) params.set('type', query.type);
+  if (query.personId) params.set('personId', query.personId);
+  return apiFetch<AbsenceRangeResponse>(`/absences?${params.toString()}`);
+}
+
+/** `GET /absences/over-cap` (HR Head / Enterprise Admin only) — days in range whose concurrent
+ *  absence count exceeds the tenant's configured cap. */
+export function getOverCapDays(query: OverCapQuery) {
+  const params = new URLSearchParams();
+  params.set('from', query.from);
+  params.set('to', query.to);
+  if (query.projectId) params.set('projectId', query.projectId);
+  return apiFetch<OverCapResponse>(`/absences/over-cap?${params.toString()}`);
+}
+
+/** `GET /leave-types/absence-cap` (Enterprise Admin only) — the tenant's concurrent-absence cap. */
+export function getAbsenceCap() {
+  return apiFetch<AbsenceCapDto>('/leave-types/absence-cap');
+}
+
+/** `PUT /leave-types/absence-cap` (Enterprise Admin only) — update the cap. */
+export function updateAbsenceCap(body: UpdateAbsenceCapRequest) {
+  return apiFetch<AbsenceCapDto>('/leave-types/absence-cap', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `GET /search` — role- and tenant-scoped global search, grouped by entity type. */
+export function globalSearch(q: string) {
+  return apiFetch<GlobalSearchResponse>(`/search?q=${encodeURIComponent(q)}`);
+}
+
+/** `GET /slack/config` (Enterprise Admin only) — the tenant's Slack integration status and settings. */
+export function getSlackConfig() {
+  return apiFetch<SlackConfigDto>('/slack/config');
+}
+
+/** `POST /slack/config/connect` (Enterprise Admin only) — verify credentials with Slack and connect. */
+export function connectSlack(body: ConnectSlackRequest) {
+  return apiFetch<SlackConfigDto>('/slack/config/connect', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `POST /slack/config/disconnect` (Enterprise Admin only) — disconnect the tenant's Slack workspace. */
+export function disconnectSlack() {
+  return apiFetch<SlackConfigDto>('/slack/config/disconnect', { method: 'POST' });
+}
+
+/** `POST /slack/config/test` (Enterprise Admin only) — send a test message to confirm the connection works. */
+export function testSlackConnection() {
+  return apiFetch<void>('/slack/config/test', { method: 'POST' });
+}
+
+/** `PUT /slack/config/settings` (Enterprise Admin only) — update notification toggles and digest config. */
+export function updateSlackSettings(body: UpdateSlackSettingsRequest) {
+  return apiFetch<SlackConfigDto>('/slack/config/settings', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `GET /profile/notification-preferences` — every notification type, merged with the caller's own overrides. */
+export function getNotificationPreferences() {
+  return apiFetch<NotificationPreferencesResponse>('/profile/notification-preferences');
+}
+
+/** `PUT /profile/notification-preferences` — toggle one type/channel; refused for mandatory types. */
+export function updateNotificationPreference(body: UpdateNotificationPreferenceRequest) {
+  return apiFetch<NotificationPreferencesResponse>('/profile/notification-preferences', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `GET /reports/summary` — request volumes, approval turnaround, and absence trend, scoped by the caller's §11A tier. */
+export function getReportSummary(query: ReportRangeQuery) {
+  const params = new URLSearchParams({ from: query.from, to: query.to });
+  if (query.projectId) params.set('projectId', query.projectId);
+  return apiFetch<ReportSummaryResponse>(`/reports/summary?${params.toString()}`);
+}
+
+/** `GET /reports/export` — downloads the visibility-scoped absence CSV for the given range. */
+export async function downloadAbsencesCsv(query: ReportRangeQuery): Promise<void> {
+  const params = new URLSearchParams({ from: query.from, to: query.to });
+  if (query.projectId) params.set('projectId', query.projectId);
+  const token = tokenStore.access;
+  const res = await fetch(`${API_URL}/reports/export?${params.toString()}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, `Export failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `absences-${query.from}-to-${query.to}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** `POST /front-desk/:requestId/check-in` — captures the visitor's signature and drives Approved → Checked-In. */
+export function checkInWithSignature(requestId: string, body: CheckInWithSignatureRequest) {
+  return apiFetch<RequestDto>(`/front-desk/${requestId}/check-in`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `GET /front-desk/:requestId/signature-url` — a fresh, short-lived signed URL to the stored signature. */
+export function getVisitorSignatureUrl(requestId: string) {
+  return apiFetch<SignedUrlResponse>(`/front-desk/${requestId}/signature-url`);
 }

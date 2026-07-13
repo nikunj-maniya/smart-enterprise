@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Phone, MapPin, Briefcase, Lock, Check, User } from 'lucide-react';
-import type { ProfileDto, UpdateProfileRequest } from '@se/shared';
+import type { NotificationPreferenceRow, ProfileDto, UpdateProfileRequest } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
-import { apiFetch, ApiError } from '@/lib/api';
+import { apiFetch, ApiError, getNotificationPreferences, updateNotificationPreference } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
 function initials(name: string) {
@@ -89,11 +89,25 @@ function Chips({ items, empty }: { items: string[]; empty: string }) {
   );
 }
 
-function DisabledToggle() {
+/** Bottom-center toggle switch — mirrors the Leave Policy page's convention. */
+function Toggle({ checked, disabled, onClick }: { checked: boolean; disabled?: boolean; onClick: () => void }) {
   return (
-    <span className="flex h-6 w-11 flex-none items-center rounded-full bg-line px-[3px] opacity-60">
-      <span className="h-[18px] w-[18px] rounded-full bg-white shadow-sm" />
-    </span>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onClick}
+      disabled={disabled}
+      className={`relative h-6 w-11 flex-none rounded-full transition-colors disabled:opacity-60 ${
+        checked ? 'bg-brand' : 'bg-ink-300'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-0'
+        }`}
+      />
+    </button>
   );
 }
 
@@ -108,6 +122,10 @@ export default function Profile() {
   const [savingInfo, setSavingInfo] = React.useState(false);
   const [infoError, setInfoError] = React.useState<string | null>(null);
   const [infoSaved, setInfoSaved] = React.useState(false);
+
+  const [prefs, setPrefs] = React.useState<NotificationPreferenceRow[] | null>(null);
+  const [prefsError, setPrefsError] = React.useState<string | null>(null);
+  const [savingPrefKey, setSavingPrefKey] = React.useState<string | null>(null);
 
   const [current, setCurrent] = React.useState('');
   const [next, setNext] = React.useState('');
@@ -125,7 +143,24 @@ export default function Profile() {
       setJobTitle(p.jobTitle ?? '');
       setLocation(p.location ?? '');
     });
+    getNotificationPreferences()
+      .then((res) => setPrefs(res.rows))
+      .catch((err) => setPrefsError(err instanceof ApiError ? err.message : 'Unable to load notification preferences.'));
   }, []);
+
+  async function onTogglePreference(row: NotificationPreferenceRow, channel: 'inApp' | 'slack') {
+    const key = `${row.type}:${channel}`;
+    setSavingPrefKey(key);
+    setPrefsError(null);
+    try {
+      const res = await updateNotificationPreference({ type: row.type, channel, enabled: !row[channel] });
+      setPrefs(res.rows);
+    } catch (err) {
+      setPrefsError(err instanceof ApiError ? err.message : 'Unable to update this preference.');
+    } finally {
+      setSavingPrefKey(null);
+    }
+  }
 
   async function onSaveInfo() {
     setInfoError(null);
@@ -249,30 +284,47 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Notification preferences (disabled until notifications-inapp ships) */}
+      {/* Notification preferences (reporting-and-polish) — per type, per channel; mandatory
+          types (e.g. "needs your approval") can't be muted on any channel. */}
       <div className={`mt-[18px] ${CARD}`}>
-        <div className="flex items-center justify-between">
-          <div className={SECTION_TITLE}>Notification preferences</div>
-          <span className="rounded-full bg-surface-muted px-[10px] py-1 text-[11px] font-semibold text-ink-400">
-            Coming soon
-          </span>
-        </div>
-        <div className="mt-2 flex flex-col">
-          <div className="flex items-center justify-between border-b border-line-soft py-[14px]">
-            <div>
-              <div className="text-[13px] font-semibold text-ink-500">Email notifications</div>
-              <div className="text-[12px] text-ink-400">Request updates and approvals by email</div>
+        <div className={SECTION_TITLE}>Notification preferences</div>
+        {prefs === null ? (
+          <div className="mt-4 text-sm text-ink-400">Loading…</div>
+        ) : (
+          <div className="mt-2 flex flex-col">
+            <div className="grid grid-cols-[1fr_90px_90px] items-center gap-3 pb-2 text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+              <span />
+              <span className="text-center">In-app</span>
+              <span className="text-center">Slack</span>
             </div>
-            <DisabledToggle />
+            {prefs.map((row) => (
+              <div
+                key={row.type}
+                className="grid grid-cols-[1fr_90px_90px] items-center gap-3 border-b border-line-soft py-[14px] last:border-b-0"
+              >
+                <div>
+                  <div className="text-[13px] font-semibold text-ink-900">{row.label}</div>
+                  {row.mandatory && <div className="text-[12px] text-ink-400">Mandatory — cannot be muted</div>}
+                </div>
+                <div className="flex justify-center">
+                  <Toggle
+                    checked={row.inApp}
+                    disabled={row.mandatory || savingPrefKey === `${row.type}:inApp`}
+                    onClick={() => onTogglePreference(row, 'inApp')}
+                  />
+                </div>
+                <div className="flex justify-center">
+                  <Toggle
+                    checked={row.slack}
+                    disabled={row.mandatory || savingPrefKey === `${row.type}:slack`}
+                    onClick={() => onTogglePreference(row, 'slack')}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="flex items-center justify-between py-[14px]">
-            <div>
-              <div className="text-[13px] font-semibold text-ink-500">Slack notifications</div>
-              <div className="text-[12px] text-ink-400">Direct messages for actions needing you</div>
-            </div>
-            <DisabledToggle />
-          </div>
-        </div>
+        )}
+        {prefsError && <div className="mt-3 text-sm font-medium text-danger">{prefsError}</div>}
       </div>
 
       {/* Change password */}

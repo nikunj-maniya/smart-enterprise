@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
+import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
 
 const GRID_COLS = 'grid-cols-[1.6fr_1.4fr_1.1fr_0.9fr_1fr]';
 
@@ -62,6 +63,7 @@ export default function PlatformUsers() {
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [status, setStatus] = React.useState('');
   const [tenantId, setTenantId] = React.useState('');
+  const { highlightId, rowRef } = useHighlightRow();
   const [enterprises, setEnterprises] = React.useState<EnterpriseDto[]>([]);
   const [resetting, setResetting] = React.useState<PlatformUserDto | null>(null);
   const [resetResult, setResetResult] = React.useState<{
@@ -208,7 +210,8 @@ export default function PlatformUsers() {
         {rows.map((user) => (
           <div
             key={user.id}
-            className={`grid ${GRID_COLS} min-w-[720px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0`}
+            ref={user.id === highlightId ? rowRef : undefined}
+            className={`grid ${GRID_COLS} min-w-[720px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0 ${highlightRingClass(user.id, highlightId)}`}
           >
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-8 w-8 flex-none items-center justify-center rounded-[9px] bg-[rgb(236,245,246)] text-[13px] font-bold text-brand">

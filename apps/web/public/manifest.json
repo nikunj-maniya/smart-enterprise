@@ -1,0 +1,11 @@
+{
+  "name": "Smart Enterprise",
+  "short_name": "Smart Enterprise",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8f8",
+  "theme_color": "#163E3E",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

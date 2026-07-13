@@ -2,6 +2,8 @@ import { Prisma } from '@prisma/client';
 import {
   DEFAULT_GENERIC_INITIAL_STATUS,
   parseDefinition,
+  REQUESTER_ROLE,
+  SYSTEM_ROLE,
   validateCoreFormFieldEdit,
   validateStageRules,
   validateStatusModel,
@@ -19,6 +21,7 @@ import {
   type SaveDraftStatusModelRequest,
   type StageRules,
   type StatusModel,
+  type StatusTransition,
   type VisibilityRule,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
@@ -97,9 +100,67 @@ async function findPublished(tenantId: string, key: string): Promise<DefinitionW
   return def;
 }
 
+/** A field's raw `options` JSON, when it's the `{ source: 'item-catalog:<type>' }` marker
+ *  (it-requests design.md) rather than a static list or picker config. */
+function catalogSourceType(options: unknown): string | null {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return null;
+  const source = (options as { source?: unknown }).source;
+  return typeof source === 'string' && source.startsWith('item-catalog:') ? source.slice('item-catalog:'.length) : null;
+}
+
+/**
+ * Resolves every `item-catalog:<type>` marker field in a served definition into a real options
+ * array, live from the tenant's `ItemCatalog` (design.md: "master data, not form-field options" —
+ * an admin's catalog edit applies with no republish). `includeArchived` is `true` only when
+ * rendering a specific pinned request (its own past submission may name an item since archived —
+ * item-catalog spec's "past requests still render it"); `false` for a fresh submission's blank
+ * form, which must only offer currently-active items.
+ */
+async function resolveCatalogOptions(tenantId: string, dto: FormDefinitionDto, includeArchived: boolean): Promise<FormDefinitionDto> {
+  const types = new Set<string>();
+  for (const s of dto.sections) {
+    for (const f of s.fields) {
+      const type = catalogSourceType(f.options);
+      if (type) types.add(type);
+    }
+  }
+  if (types.size === 0) return dto;
+
+  const items = await prisma.itemCatalog.findMany({
+    where: { tenantId, type: { in: [...types] }, ...(includeArchived ? {} : { archived: false }) },
+    orderBy: { name: 'asc' },
+  });
+  const optionsByType = new Map<string, { value: string; label: string }[]>();
+  for (const item of items) {
+    const arr = optionsByType.get(item.type) ?? [];
+    arr.push({ value: item.name, label: item.name });
+    optionsByType.set(item.type, arr);
+  }
+
+  return {
+    ...dto,
+    sections: dto.sections.map((s) => ({
+      ...s,
+      fields: s.fields.map((f) => {
+        const type = catalogSourceType(f.options);
+        return type ? { ...f, options: optionsByType.get(type) ?? [] } : f;
+      }),
+    })),
+  };
+}
+
 /** GET /forms/:key — the tenant's full latest published definition for a key. */
 export async function getFormByKey(tenantId: string, key: string): Promise<FormDefinitionDto> {
-  return toDefinitionDto(await findPublished(tenantId, key));
+  const dto = toDefinitionDto(await findPublished(tenantId, key));
+  return resolveCatalogOptions(tenantId, dto, false);
+}
+
+/** A request's own pinned definition row-set, by id rather than latest-by-key — so a request
+ *  created under an older version keeps rendering against that exact version after a republish. */
+export async function getDefinitionById(tenantId: string, id: string): Promise<FormDefinitionDto> {
+  const def = await prisma.formDefinition.findFirst({ where: { id, tenantId }, include: fullInclude });
+  if (!def) throw new HttpError(404, 'Form definition not found');
+  return resolveCatalogOptions(tenantId, toDefinitionDto(def), true);
 }
 
 /** Prisma row-set → the shared engine's `FormDefinition` (nulls → undefined, unlike the DTO). */
@@ -129,6 +190,39 @@ function toFormDefinition(def: DefinitionWithGraph): FormDefinition {
 }
 
 /** The tenant's latest published definition, ready for server-side (re)validation, plus id/version to pin and the status its state machine starts every new request in. A custom form without a configured status model falls back to the generic default so it stays submittable. */
+/**
+ * Some core forms' first declared state is a pre-approval placeholder nobody but the requester
+ * (who just submitted) could ever act on — e.g. Visitor's `Pre-Registered`, IT's `Requested` —
+ * with a `requester`-only transition immediately out of it. Nothing else in the system ever
+ * fires that transition, so submission resolves straight through any such leading placeholder
+ * rather than leaving every request stuck at the first hop forever.
+ *
+ * Stops the instant the current state is actionable by anyone other than the requester (or the
+ * reserved `system` actor) — that's the real landing spot other actors need to see. A
+ * requester-only "change my mind" escape hatch *coexisting* with that real landing spot (Visitor's
+ * `Pending Approval` also declares its own `-> Cancelled`, alongside the Process Head's `->
+ * Approved`) must NOT cause a further hop into that escape hatch — only a state with NO
+ * non-requester action at all is a pure placeholder worth skipping past.
+ */
+function resolveEffectiveInitialStatus(states: string[], transitions: StatusTransition[]): string {
+  let current = states[0];
+  const seen = new Set([current]);
+  for (;;) {
+    const hasNonRequesterAction = transitions.some(
+      (t) => t.from === current && !(t.roles.length === 1 && (t.roles[0] === REQUESTER_ROLE || t.roles[0] === SYSTEM_ROLE)),
+    );
+    if (hasNonRequesterAction) break;
+
+    const auto = transitions.find(
+      (t) => t.from === current && t.roles.length === 1 && t.roles[0] === REQUESTER_ROLE && !seen.has(t.to),
+    );
+    if (!auto) break;
+    current = auto.to;
+    seen.add(current);
+  }
+  return current;
+}
+
 export async function getPublishedDefinitionForSubmission(
   tenantId: string,
   key: string,
@@ -141,8 +235,11 @@ export async function getPublishedDefinitionForSubmission(
 }> {
   const def = await findPublished(tenantId, key);
   const states = def.statusModel?.states;
+  const rawTransitions = def.statusModel?.transitions;
   const initialStatus =
-    Array.isArray(states) && typeof states[0] === 'string' ? states[0] : DEFAULT_GENERIC_INITIAL_STATUS;
+    Array.isArray(states) && typeof states[0] === 'string'
+      ? resolveEffectiveInitialStatus(states as string[], (rawTransitions as StatusTransition[] | undefined) ?? [])
+      : DEFAULT_GENERIC_INITIAL_STATUS;
   return {
     id: def.id,
     version: def.version,

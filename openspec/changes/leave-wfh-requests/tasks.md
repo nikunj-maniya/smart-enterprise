@@ -1,44 +1,48 @@
 ## 1. Leave Policy & Balances Foundation
 
-- [ ] 1.1 Leave Policy & Quotas admin page: per-type annual allocations, carry-forward + half-day toggles, save with audit log _(Slice 1)_
-- [ ] 1.2 Balance initialization: create/refresh `LeaveBalance` rows from the tenant policy _(Slice 1)_
-- [ ] 1.3 Employee balance cards (used/total + progress) on My Requests, read-only _(Slice 2)_
+- [x] 1.1 Leave Policy & Quotas admin page: per-type annual allocations, carry-forward + half-day toggles, save with audit log _(Slice 1)_ — `GET/PUT /leave-types` (Enterprise Admin only, `leave-types.service.ts`), audit-logged; `pages/organization/LeavePolicy.tsx` (table with quota input, Paid/Unpaid badge, carry-forward/half-day toggles, per-row Save).
+- [x] 1.2 Balance initialization: create/refresh `LeaveBalance` rows from the tenant policy _(Slice 1)_ — `seedTenantLeaveTypes`/`initializeUserLeaveBalances` (`org-masters/seed.service.ts`), wired into tenant activation, org-user creation, and self-registration approve/reactivate; a quota edit refreshes existing balances by the *delta* (not a flat reset) so days already used stay used. Verified live: a freshly registered tenant seeds all 5 PRD leave types + balances at quota; a newly created org user gets balances immediately.
+- [x] 1.3 Employee balance cards (used/total + progress) on My Requests, read-only _(Slice 2)_ — `GET /leave-balances/me`; `MyRequests.tsx`'s new `BalanceCard` (reuses the existing `StatCard` container), one per paid leave type with a thin used/total progress bar.
 
 ## 2. Leave Wizard
 
-- [ ] 2.1 Seed the Leave `FormDefinition` metadata (fields, validation, visibility rules) _(Slice 3)_
-- [ ] 2.2 Wizard step 1: department/project/PM/Tech-Lead selects + discussed-with, matching the design _(Slice 3)_
-- [ ] 2.3 Wizard step 2: duration pills, dates, day/half-day counts with cross-checks, when-will-you-go, leave type _(Slice 3)_
-- [ ] 2.4 Wizard step 3: context + routing preview; submit creates the request with snapshotted approvers _(Slice 3)_
-- [ ] 2.5 Conditional HR block: > 2 days shows mandatory HR Head select; server re-validates against the date range _(Slice 4)_
-- [ ] 2.6 Over-balance pre-submit warning (warn, never block) _(Slice 4)_
+- [x] 2.1 Seed the Leave `FormDefinition` metadata (fields, validation, visibility rules) _(Slice 3)_ — pre-existed from `form-engine`'s `core-forms.ts`. Found and fixed a real bug while wiring balances: the seeded status model started at `Draft` with no automatic path to `Pending Approval` (nothing ever fired the `Draft→Submitted→Pending Approval` hops), so every Leave/WFH submission was stuck at `Draft` forever — contradicting this change's own spec ("created in Pending Approval"). Simplified both core forms' status models to start directly in `Pending Approval`, removing the vestigial states. Verified live: a fresh submission now lands in `Pending Approval` immediately.
+- [ ] 2.2 Wizard step 1: department/project/PM/Tech-Lead selects + discussed-with, matching the design _(Slice 3)_ — **scope reduction, not built**: the existing generic single-page `RequestForm.tsx`/`FormRenderer` (from `form-engine`) is reused as-is rather than a bespoke 3-step wizard. All the same fields/validation/pickers render and submit correctly (verified live end-to-end below), just not in the design's exact 3-step layout. A real multi-step wizard UI was out of reach in this pass; flagging honestly rather than silently shipping a different UI than spec'd.
+- [ ] 2.3 Wizard step 2: duration pills, dates, day/half-day counts with cross-checks, when-will-you-go, leave type _(Slice 3)_ — same scope reduction as 2.2; the fields exist and validate (client + server) on the single-page form, not as a distinct wizard step.
+- [x] 2.4 Wizard step 3: context + routing preview; submit creates the request with snapshotted approvers _(Slice 3)_ — submission itself (pre-existing from form-engine, confirmed working with the 2.1 fix) creates the request with snapshotted approvers correctly. Routing preview added to `RequestForm.tsx`: resolves `approvalWorkflow.stageRules` against live form values (`isFieldVisible` for conditional stages) and shows each active stage with its selected-approver count, or "No approver selected yet" — not full approver *names* (no by-id directory-lookup endpoint exists to resolve a picked user id back to a name from the generic renderer), a documented fallback.
+- [x] 2.5 Conditional HR block: > 2 days shows mandatory HR Head select; server re-validates against the date range _(Slice 4)_ — the conditional field visibility/requiredness pre-existed (form-engine's rule engine); added the missing independent server-side check (`leave-wfh-rules.ts`'s `assertHrSignoffPresentWhenRequired`): computes days from the actual `start_date`/`end_date` (not trusted from the client's duration radio) and refuses submission if that's >2 days and no HR Head stage is present. Verified live: a submission claiming "≤2 days" with a date range actually spanning 5 days is refused with a 400 until HR is added; the correct 3-approver (PM/TL/HR) case then submits and approves normally.
+- [x] 2.6 Over-balance pre-submit warning (warn, never block) _(Slice 4)_ — server computes `overBalance` at submission (`computeOverBalance`, stored on the request, never blocking); `RequestForm.tsx` also shows a live non-blocking amber banner client-side as the employee fills in leave type/day count, comparing against their fetched balance. Verified live: a 20-day request against a 16-day remaining balance submits successfully with `overBalance: true`.
 
 ## 3. WFH Wizard
 
-- [ ] 3.1 Seed the WFH `FormDefinition` metadata _(Slice 5)_
-- [ ] 3.2 WFH wizard steps 1–3 incl. can-you-not-avoid pills and conditional HR block _(Slice 5)_
-- [ ] 3.3 Special-condition soft flag: server-side history check, badge for HR, never blocks _(Slice 5)_
+- [x] 3.1 Seed the WFH `FormDefinition` metadata _(Slice 5)_ — pre-existed; same status-model fix as 2.1 applied identically.
+- [ ] 3.2 WFH wizard steps 1–3 incl. can-you-not-avoid pills and conditional HR block _(Slice 5)_ — same scope reduction as 2.2/2.3: generic single-page renderer, not a bespoke wizard. The conditional HR block itself (visibility + the new server-side date re-check) verified live for WFH too — a claimed "Up to 2 days" WFH request with dates spanning 6 days is refused identically to Leave.
+- [x] 3.3 Special-condition soft flag: server-side history check, badge for HR, never blocks _(Slice 5)_ — `computeSpecialConditionFlag`: flags a `special_condition: 'Yes'` WFH request when the requester has claimed it before (a one-off claim is unremarkable; a repeated pattern is what HR should see — this specific criterion is a judgment call given the spec's underspecified "validated against history"). **Caught and fixed a real bug during verification**: the first implementation counted prior *flagged* requests instead of prior *claimed* ones, which is always zero (only the 2nd+ claim is ever flagged) — the flag never fired. Fixed to count claims via a JSON-path query on the payload. Verified live: 1st claim → not flagged; 2nd claim → flagged; 3rd claim (post-fix, re-verified) → flagged.
 
 ## 4. My Requests
 
-- [ ] 4.1 My Requests table (own requests only) opening the Request Detail drawer _(Slice 6)_
-- [ ] 4.2 Awaiting-approval stat card + withdraw action while no approver has acted _(Slice 6)_
+- [x] 4.1 My Requests table (own requests only) opening the Request Detail drawer _(Slice 6)_ — pre-existed (form-engine/approval-workflow); unchanged by this session beyond the balance cards (1.3).
+- [x] 4.2 Awaiting-approval stat card + withdraw action while no approver has acted _(Slice 6)_ — stat card pre-existed. **Found and fixed a real regression** in the withdraw action: `approval-workflow`'s move to parallel (AND-gate) approval means a partial decision no longer changes `request.status` off `Pending Approval`, so the withdraw transition's declared-transition check (which the old OR-gate model relied on implicitly) no longer refused a withdraw after the first approver acted — a requester could withdraw a request PM had already approved. Fixed both server-side (`transitionRequest` now explicitly refuses a requester-gated transition once any approver has a non-pending decision) and client-side (`RequestDetailDrawer`'s Withdraw-button visibility check mirrors the same rule). Verified live: pre-decision withdraw succeeds; post-PM-approval withdraw now correctly refused with 409.
 
 ## 5. Balance Engine
 
-- [ ] 5.1 Deduction hook in the approval engine's final-decision transaction: `FOR UPDATE` on the balance row, re-check, deduct (half-days 0.5) _(Slice 7)_
-- [ ] 5.2 LWP exemption: final approval of LWP changes no paid balance _(Slice 7)_
-- [ ] 5.3 Restore on authorized post-approval cancel and on permitted withdraw, under the same row lock _(Slice 8)_
+- [x] 5.1 Deduction hook in the approval engine's final-decision transaction: `FOR UPDATE` on the balance row, re-check, deduct (half-days 0.5) _(Slice 7)_ — `leave-balance-ledger.ts`'s `adjustLeaveBalance`, called from `decisions.service.ts`'s `Approved`-outcome branch, in the same transaction. Verified live: single approval deducts exactly the right amount (including a half-day case: 2 days + 1 half-day → 1.5 effective deducted); **verified live under real concurrency**: two separate requests for the same employee/leave-type, both finalized via literally concurrent HTTP requests (backgrounded, fired together) — the row lock serialized them correctly, both deductions landed (no lost update), balance never went negative.
+- [x] 5.2 LWP exemption: final approval of LWP changes no paid balance _(Slice 7)_ — `adjustLeaveBalance` no-ops for `isPaid: false` types. Verified live: a 3-approver LWP request (5 days) fully approved leaves every balance untouched.
+- [x] 5.3 Restore on authorized post-approval cancel and on permitted withdraw, under the same row lock _(Slice 8)_ — `restoreBalanceOnCancel` (extractors.ts) now calls the same `adjustLeaveBalance` (sign reversed) under the same row lock. Verified live: HR-cancel of an approved 2-day request restores the balance exactly. "Restore on permitted withdraw" doesn't have a live path to exercise — the seeded status model's `Withdrawn` transition is only reachable from `Pending Approval` (pre-deduction), never from `Approved`, so nothing is ever deducted before a withdraw is possible; restore-on-withdraw is therefore correctly a no-op by construction, not a gap.
 
 ## 6. HR Sign-offs
 
-- [ ] 6.1 Sign-offs screen: Awaiting-HR/Decided tabs, request cards with flags + chain, empty state _(Slice 9)_
-- [ ] 6.2 Sign off / Decline with reason modal; decline rejects the request _(Slice 9)_
+- [x] 6.1 Sign-offs screen: Awaiting-HR/Decided tabs, request cards with flags + chain, empty state _(Slice 9)_ — new `pages/requests/HrSignoffs.tsx`, cloned from `ApprovalsQueue.tsx`'s structure with `roleContext` forced to `hr-head` (no role toggle needed) and `overBalance`/`specialConditionFlagged` shown as amber flag pills on each card.
+- [x] 6.2 Sign off / Decline with reason modal; decline rejects the request _(Slice 9)_ — same `decideOnRequest` call as the general Approvals Queue (design.md: "no separate HR decision model"); the modal/button read "Decline" instead of "Reject" but the underlying call and required-reason behavior are identical (already verified generically in `approval-workflow`).
 
 ## 7. Verify
 
-- [ ] 7.1 Leave > 2 days forces HR selection; ≤ 2 days never shows it; server rejects mismatched claims
-- [ ] 7.2 Two concurrent final approvals deduct exactly once; balance never negative
-- [ ] 7.3 Cancel of an approved leave restores the days; LWP round-trips with no balance change
-- [ ] 7.4 Withdraw is blocked after the first approver acts
-- [ ] 7.5 Every submission/decision/cancel appears in the Audit Log
+- [x] 7.1 Leave > 2 days forces HR selection; ≤ 2 days never shows it; server rejects mismatched claims — verified live for both Leave and WFH (see 2.5/3.2).
+- [x] 7.2 Two concurrent final approvals deduct exactly once; balance never negative — verified live with genuinely concurrent HTTP requests, not just sequential calls (see 5.1).
+- [x] 7.3 Cancel of an approved leave restores the days; LWP round-trips with no balance change — verified live (see 5.2/5.3).
+- [x] 7.4 Withdraw is blocked after the first approver acts — verified live; this was a real regression caught and fixed during this verification pass (see 4.2).
+- [x] 7.5 Every submission/decision/cancel appears in the Audit Log — verified live: `create`/`approved`/`transition` actions all present in the tenant's audit log after exercising the full lifecycle.
+
+### Known scope reduction
+
+Tasks 2.2, 2.3, and 3.2's bespoke 3-step wizard UI (per the design prototype's Employee Leave/WFH wizard screens) was **not built** in this pass — Leave/WFH submission instead reuses the existing generic single-page `RequestForm`/`FormRenderer` from `form-engine`. Every field, validation rule, conditional block, and the routing preview/over-balance warning work correctly on that single page (all verified live above); the visual/UX difference from the design's discrete 3-step wizard is the acknowledged gap. No DesignSync fetch was performed for the wizard screens specifically (unavailable in this environment for the earlier Notifications Center page too). A follow-up pass could build the bespoke wizard on top of the same `useFormEngine`/`FormRenderer` primitives without touching the backend.

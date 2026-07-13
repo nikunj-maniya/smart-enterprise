@@ -58,6 +58,12 @@ function buildFieldSchema(field: FormField): z.ZodTypeAny | null {
     case 'checkbox':
     case 'consent-link':
       return z.boolean();
+    case 'date-multi':
+      // Specific half-day dates within a leave/WFH range (reporting-and-polish: upgrades the
+      // v1 half-day count field) — a plain array of ISO date strings at the generic level; the
+      // leave/WFH-specific "must fall within [start_date, end_date]" rule is re-checked
+      // server-side in `leave-wfh-rules.ts`, the same pattern as the HR-signoff rule.
+      return z.array(z.string().min(1));
     case 'daterange': {
       const schema = z.object({ start: z.string().min(1), end: z.string().min(1) });
       if (validation?.dateOrder === true) {

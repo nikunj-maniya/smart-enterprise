@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { FileText, House, Monitor, Plane, UserCheck, type LucideIcon } from 'lucide-react';
+import { SYSTEM_ROLE_NAMES, type SystemRoleKey } from '@se/shared';
 
 /** Core form key → icon/short type label (design's Type column). Unknown (custom-form) keys fall back to a generic icon + the form's own title. */
 const REQUEST_TYPE_META: Record<string, { icon: LucideIcon; label: string }> = {
@@ -102,6 +103,30 @@ export function EmptyState({
       <div className="mt-[5px] text-[13px] text-ink-400">{message}</div>
     </div>
   );
+}
+
+/** An approver's own decision, or the special "you" chain entry, rendered as a small dot badge. */
+const DECISION_META: Record<'pending' | 'approved' | 'rejected', { label: string; bg: string; fg: string }> = {
+  pending: { label: 'Pending', bg: 'rgb(255,247,237)', fg: 'rgb(204,78,0)' },
+  approved: { label: 'Approved', bg: 'rgb(233,246,233)', fg: 'rgb(33,131,88)' },
+  rejected: { label: 'Rejected', bg: 'rgb(254,235,236)', fg: 'rgb(206,44,49)' },
+};
+
+export function DecisionBadge({ decision, label }: { decision: 'pending' | 'approved' | 'rejected'; label?: string }) {
+  const c = DECISION_META[decision];
+  return (
+    <span
+      className="inline-flex items-center gap-[6px] rounded-full px-[10px] py-1 text-xs font-medium"
+      style={{ background: c.bg, color: c.fg }}
+    >
+      <span className="h-[6px] w-[6px] flex-none rounded-full" style={{ background: c.fg }} />
+      {label ?? c.label}
+    </span>
+  );
+}
+
+export function roleContextLabel(roleContext: string): string {
+  return SYSTEM_ROLE_NAMES[roleContext as SystemRoleKey] ?? roleContext;
 }
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {

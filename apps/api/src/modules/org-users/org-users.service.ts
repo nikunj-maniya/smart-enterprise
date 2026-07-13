@@ -13,6 +13,7 @@ import type {
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
+import { initializeUserLeaveBalances } from '../org-masters/seed.service.js';
 
 const withRolesAndDepartments = {
   roles: { include: { role: { select: { id: true, name: true } } } },
@@ -147,6 +148,7 @@ export async function createOrgUser(
       },
       include: withRolesAndDepartments,
     });
+    await initializeUserLeaveBalances(tx, tenantId, user.id);
     await tx.auditLog.create({
       data: {
         tenantId,
@@ -319,6 +321,7 @@ export async function reactivateOrgUser(
       data: { status: UserStatus.Active },
       include: withRolesAndDepartments,
     });
+    await initializeUserLeaveBalances(tx, tenantId, id);
     await tx.auditLog.create({
       data: {
         tenantId,
@@ -353,6 +356,7 @@ export async function approveOrgUser(
       data: { status: UserStatus.Active },
       include: withRolesAndDepartments,
     });
+    await initializeUserLeaveBalances(tx, tenantId, id);
     await tx.auditLog.create({
       data: {
         tenantId,

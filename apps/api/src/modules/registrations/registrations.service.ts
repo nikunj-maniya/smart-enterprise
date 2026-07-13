@@ -10,7 +10,14 @@ import { AuditAction, RegistrationStatus } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 import { getSettings } from '../settings/settings.service.js';
-import { grantEnterpriseAdminRole, seedTenantOrgDefaults } from '../org-masters/seed.service.js';
+import {
+  grantEnterpriseAdminRole,
+  initializeUserLeaveBalances,
+  seedTenantEscalationDefaults,
+  seedTenantItemCatalog,
+  seedTenantLeaveTypes,
+  seedTenantOrgDefaults,
+} from '../org-masters/seed.service.js';
 import { seedTenantCoreForms } from '../forms/forms.seed.js';
 
 function toDto(reg: {
@@ -162,8 +169,12 @@ export async function acceptRegistration(
     await tx.tenant.update({ where: { id: reg.tenantId }, data: { status: TenantStatus.Active } });
     await tx.user.update({ where: { id: reg.userId }, data: { status: UserStatus.Active } });
     await seedTenantOrgDefaults(tx, reg.tenantId);
+    await seedTenantEscalationDefaults(tx, reg.tenantId);
+    await seedTenantLeaveTypes(tx, reg.tenantId);
+    await seedTenantItemCatalog(tx, reg.tenantId);
     await seedTenantCoreForms(tx, reg.tenantId, actorId);
     await grantEnterpriseAdminRole(tx, reg.tenantId, reg.userId);
+    await initializeUserLeaveBalances(tx, reg.tenantId, reg.userId);
     const updatedReg = await tx.enterpriseRegistration.update({
       where: { id },
       data: { status: RegistrationStatus.Accepted, reviewedBy: actorId },
