@@ -78,7 +78,13 @@ const leave: PublishDefinitionInput = {
       title: 'Leave Details',
       fields: [
         { key: 'full_name', label: 'Full Name', type: 'text', required: true },
-        { key: 'department', label: 'Group / Department', type: 'single-select', required: true },
+        {
+          key: 'department',
+          label: 'Group / Department',
+          type: 'single-select',
+          required: true,
+          options: { source: 'departments' },
+        },
         {
           key: 'project_name',
           label: 'Project name',
@@ -195,7 +201,13 @@ const wfh: PublishDefinitionInput = {
       title: 'Work From Home Details',
       fields: [
         { key: 'full_name', label: 'Full Name', type: 'text', required: true },
-        { key: 'department', label: 'Group / Department', type: 'single-select', required: true },
+        {
+          key: 'department',
+          label: 'Group / Department',
+          type: 'single-select',
+          required: true,
+          options: { source: 'departments' },
+        },
         {
           key: 'project_name',
           label: 'Project name',
