@@ -36,6 +36,7 @@ import {
   publicSelfRegistrationRouter,
 } from './modules/self-registration/self-registration.routes.js';
 import { errorHandler } from './middleware/error.js';
+import { globalRateLimiter, authRateLimiter } from './middleware/rate-limit.js';
 import { scheduleAutoCompleteRequestsJob } from './jobs/auto-complete-requests.job.js';
 import { scheduleApprovalRemindersJob } from './jobs/approval-reminders.job.js';
 import { scheduleEscalationSweepJob } from './jobs/escalation-sweep.job.js';
@@ -49,6 +50,7 @@ app.use(cors());
 // posts this endpoint as form-urlencoded, not JSON, so express.json() below leaves it untouched.
 app.use('/slack/interactions', express.raw({ type: '*/*' }));
 app.use(express.json());
+app.use(globalRateLimiter);
 
 app.get('/health', (_req, res) => {
   const body: HealthResponse = {
@@ -59,7 +61,7 @@ app.get('/health', (_req, res) => {
   res.json(body);
 });
 
-app.use('/auth', authRouter);
+app.use('/auth', authRateLimiter, authRouter);
 app.use('/registrations', registrationsRouter);
 app.use('/overview', overviewRouter);
 app.use('/notifications', notificationsRouter);
@@ -87,7 +89,7 @@ app.use('/directory', directoryRouter);
 app.use('/profile', profileRouter);
 app.use('/enterprise-profile', enterpriseProfileRouter);
 app.use('/self-registration', selfRegistrationRouter);
-app.use('/public/self-registration', publicSelfRegistrationRouter);
+app.use('/public/self-registration', authRateLimiter, publicSelfRegistrationRouter);
 
 app.use(errorHandler);
 
