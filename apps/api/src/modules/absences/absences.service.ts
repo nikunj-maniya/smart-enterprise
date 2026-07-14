@@ -66,8 +66,8 @@ export async function listAbsences(tenantId: string, viewer: Viewer, query: Abse
       projectId: r.projectId,
       projectName: r.projectId ? (projectNameById.get(r.projectId) ?? null) : null,
       type: r.form.key as 'leave' | 'wfh',
-      startDate: r.startDate!.toISOString(),
-      endDate: r.endDate!.toISOString(),
+      startDate: r.startDate!.toISOString().slice(0, 10),
+      endDate: r.endDate!.toISOString().slice(0, 10),
       halfDayCount: r.halfDayCount ?? null,
       ...(includeReason ? { reason } : {}),
     };

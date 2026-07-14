@@ -1236,6 +1236,7 @@ export const absenceEntryDtoSchema = z.object({
   projectId: z.string().nullable(),
   projectName: z.string().nullable(),
   type: absenceTypeSchema,
+  /** Plain `YYYY-MM-DD` (a calendar day, not an instant) — matches `OverCapDayDto.date`. */
   startDate: z.string(),
   endDate: z.string(),
   halfDayCount: z.number().nullable(),

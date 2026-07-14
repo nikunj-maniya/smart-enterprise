@@ -108,40 +108,64 @@ function catalogSourceType(options: unknown): string | null {
   return typeof source === 'string' && source.startsWith('item-catalog:') ? source.slice('item-catalog:'.length) : null;
 }
 
+/** A field's raw `options` JSON, when it's the `{ source: 'departments' }` marker. */
+function isDepartmentsSource(options: unknown): boolean {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return false;
+  return (options as { source?: unknown }).source === 'departments';
+}
+
 /**
- * Resolves every `item-catalog:<type>` marker field in a served definition into a real options
- * array, live from the tenant's `ItemCatalog` (design.md: "master data, not form-field options" —
- * an admin's catalog edit applies with no republish). `includeArchived` is `true` only when
- * rendering a specific pinned request (its own past submission may name an item since archived —
- * item-catalog spec's "past requests still render it"); `false` for a fresh submission's blank
- * form, which must only offer currently-active items.
+ * Resolves every `item-catalog:<type>` and `departments` marker field in a served definition into
+ * a real options array, live from the tenant's `ItemCatalog` (design.md: "master data, not
+ * form-field options" — an admin's catalog edit applies with no republish) and `Department` tables.
+ * `includeArchived` is `true` only when rendering a specific pinned request (its own past
+ * submission may name an item/department since archived — item-catalog spec's "past requests still
+ * render it"); `false` for a fresh submission's blank form, which must only offer currently-active
+ * options.
  */
 async function resolveCatalogOptions(tenantId: string, dto: FormDefinitionDto, includeArchived: boolean): Promise<FormDefinitionDto> {
   const types = new Set<string>();
+  let needsDepartments = false;
   for (const s of dto.sections) {
     for (const f of s.fields) {
       const type = catalogSourceType(f.options);
       if (type) types.add(type);
+      if (isDepartmentsSource(f.options)) needsDepartments = true;
     }
   }
-  if (types.size === 0) return dto;
+  if (types.size === 0 && !needsDepartments) return dto;
 
-  const items = await prisma.itemCatalog.findMany({
-    where: { tenantId, type: { in: [...types] }, ...(includeArchived ? {} : { archived: false }) },
-    orderBy: { name: 'asc' },
-  });
+  const [items, departments] = await Promise.all([
+    types.size > 0
+      ? prisma.itemCatalog.findMany({
+          where: { tenantId, type: { in: [...types] }, ...(includeArchived ? {} : { archived: false }) },
+          orderBy: { name: 'asc' },
+        })
+      : [],
+    needsDepartments
+      ? prisma.department.findMany({
+          where: { tenantId, ...(includeArchived ? {} : { archived: false }) },
+          orderBy: { name: 'asc' },
+        })
+      : [],
+  ]);
   const optionsByType = new Map<string, { value: string; label: string }[]>();
   for (const item of items) {
     const arr = optionsByType.get(item.type) ?? [];
     arr.push({ value: item.name, label: item.name });
     optionsByType.set(item.type, arr);
   }
+  // `value` is the real Department id, not its name — `extractors.ts` stores this field's
+  // submitted value verbatim into `Request.departmentId`, a true FK every other department-aware
+  // read (absences, fulfilment, filters) joins against `Department.id`.
+  const departmentOptions = departments.map((d) => ({ value: d.id, label: d.name }));
 
   return {
     ...dto,
     sections: dto.sections.map((s) => ({
       ...s,
       fields: s.fields.map((f) => {
+        if (isDepartmentsSource(f.options)) return { ...f, options: departmentOptions };
         const type = catalogSourceType(f.options);
         return type ? { ...f, options: optionsByType.get(type) ?? [] } : f;
       }),
@@ -203,6 +227,12 @@ function toFormDefinition(def: DefinitionWithGraph): FormDefinition {
  * `Pending Approval` also declares its own `-> Cancelled`, alongside the Process Head's `->
  * Approved`) must NOT cause a further hop into that escape hatch — only a state with NO
  * non-requester action at all is a pure placeholder worth skipping past.
+ *
+ * When a placeholder's only way out is a lone `system`-gated transition (a legacy `Draft ->
+ * Submitted -> Pending Approval` shape, `Submitted`'s auto-advance to `Pending Approval` fired by
+ * the system, not the requester), that one is the real forward path and must be preferred over any
+ * requester-only escape hatch declared from the same state (e.g. `Submitted -> Withdrawn`) — walking
+ * the escape hatch instead would resolve every fresh submission straight into `Withdrawn`.
  */
 function resolveEffectiveInitialStatus(states: string[], transitions: StatusTransition[]): string {
   let current = states[0];
@@ -213,9 +243,9 @@ function resolveEffectiveInitialStatus(states: string[], transitions: StatusTran
     );
     if (hasNonRequesterAction) break;
 
-    const auto = transitions.find(
-      (t) => t.from === current && t.roles.length === 1 && t.roles[0] === REQUESTER_ROLE && !seen.has(t.to),
-    );
+    const auto =
+      transitions.find((t) => t.from === current && t.roles.length === 1 && t.roles[0] === SYSTEM_ROLE && !seen.has(t.to)) ??
+      transitions.find((t) => t.from === current && t.roles.length === 1 && t.roles[0] === REQUESTER_ROLE && !seen.has(t.to));
     if (!auto) break;
     current = auto.to;
     seen.add(current);

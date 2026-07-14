@@ -16,7 +16,8 @@ export function DayDetailPanel({
   showReason: boolean;
   onClose: () => void;
 }) {
-  const label = new Date(`${dateIso}T00:00:00`).toLocaleDateString(undefined, {
+  const [year, month, day] = dateIso.slice(0, 10).split('-').map(Number);
+  const label = new Date(year, month - 1, day).toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
     day: 'numeric',

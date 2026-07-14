@@ -61,8 +61,12 @@ export function rowOverlapsDate(row: AbsenceEntryDto, iso: string): boolean {
   return row.startDate <= iso && row.endDate >= iso;
 }
 
+/** Reads only the leading `YYYY-MM-DD` and builds a local-time `Date` from its components —
+ *  tolerates a plain date or a full ISO datetime alike, and never shifts a calendar day across
+ *  the viewer's timezone boundary the way parsing-as-UTC-then-formatting-as-local would. */
 export function formatDateShort(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 export function formatDateRangeShort(startDate: string, endDate: string): string {

@@ -1,4 +1,4 @@
-import { statusModelSchema, type RequestDto } from '@se/shared';
+import { REQUESTER_ROLE, statusModelSchema, SYSTEM_ROLE, type RequestDto } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 import * as notificationsService from '../notifications/notifications.service.js';
@@ -54,6 +54,22 @@ export async function decideOnRequest(
     const myRow = request.approvers.find((a) => a.approverId === actor.id);
     if (!myRow) throw new HttpError(403, 'You are not an approver on this request');
     if (myRow.decision !== 'pending') throw new HttpError(409, 'You have already decided this request');
+
+    // The request must still be sitting in a status its form's status model declares an
+    // approver-actionable (non-requester, non-system) transition out of. Guards against a request
+    // that moved on outside the decision engine (Withdrawn, a pre-approval Cancel, etc.) while this
+    // approver's row was still `pending` — without this, their decision would be silently accepted
+    // (or, for the last such decision, crash trying to apply a transition never declared for the
+    // request's actual current status). Checking the status model's shape (rather than whether the
+    // request has ever transitioned) means a request corrected back onto a decidable status stays
+    // decidable too.
+    const statusModel = statusModelSchema.parse(request.form.statusModel);
+    const isStillDecidable = statusModel.transitions.some(
+      (t) => t.from === request.status && t.roles.some((r) => r !== REQUESTER_ROLE && r !== SYSTEM_ROLE),
+    );
+    if (!isStillDecidable) {
+      throw new HttpError(409, 'This request is no longer awaiting your decision.');
+    }
 
     // Optimistic guard: only succeeds if still pending — blocks a concurrent double-decision
     // (e.g. two tabs) from both recording.
