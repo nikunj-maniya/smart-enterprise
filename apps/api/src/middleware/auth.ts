@@ -1,8 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
-import { TenantStatus, UserStatus } from '@prisma/client';
 import { SystemRoleKey } from '@se/shared';
-import { prisma } from '../prisma.js';
 import { verifyAccessToken } from '../lib/jwt.js';
+import { resolveAuthedUser } from '../lib/auth-cache.js';
 import { HttpError } from '../lib/http-error.js';
 
 export interface AuthedUser {
@@ -31,20 +30,11 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
     const token = header.slice('Bearer '.length);
     const payload = verifyAccessToken(token);
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      include: { tenant: true, roles: { include: { role: true } } },
-    });
-    if (!user || user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
+    const authedUser = await resolveAuthedUser(payload.sub);
+    if (!authedUser) {
       throw new HttpError(401, 'User not found or inactive');
     }
-    req.user = {
-      id: user.id,
-      email: user.email,
-      isSystemAdmin: user.isSystemAdmin,
-      tenantId: user.tenantId,
-      roles: user.roles.map((ur) => ur.role.key),
-    };
+    req.user = authedUser;
     next();
   } catch (err) {
     if (err instanceof HttpError) return next(err);

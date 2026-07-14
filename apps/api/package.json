@@ -21,11 +21,13 @@
   "dependencies": {
     "@prisma/client": "^6.1.0",
     "@se/shared": "workspace:*",
+    "@socket.io/redis-adapter": "^8.3.0",
     "argon2": "^0.41.1",
     "bullmq": "^5.79.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.2",
     "minio": "^8.0.7",
