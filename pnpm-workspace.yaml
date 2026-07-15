@@ -1,3 +1,15 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# pnpm v11 removed `onlyBuiltDependencies` (package.json's `pnpm` field is no longer read at all)
+# in favor of this workspace-level allow-list — same five packages' install scripts as before.
+allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  argon2: true
+  esbuild: true
+  # Wasn't in the old onlyBuiltDependencies allow-list either — keep its behavior unchanged
+  # (pure-JS fallback; msgpackr-extract's native build is a perf-only optional extra).
+  msgpackr-extract: false
+  prisma: true
