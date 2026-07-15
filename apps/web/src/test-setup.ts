@@ -12,6 +12,8 @@ for (const prop of props) {
 
 globalTarget.window = dom.window;
 globalTarget.document = dom.window.document;
-globalTarget.navigator = dom.window.navigator;
+// Node's own built-in `navigator` global is a getter-only accessor, so a plain assignment throws
+// (Node 21+) — defineProperty can still override it since that accessor is itself configurable.
+Object.defineProperty(globalTarget, 'navigator', { value: dom.window.navigator, configurable: true, writable: true });
 // React 18's act() environment check — without this, @testing-library/react warns on every render.
 globalTarget.IS_REACT_ACT_ENVIRONMENT = true;
