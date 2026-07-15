@@ -34,6 +34,7 @@ export const SystemRoleKey = {
   ProcessHead: 'process-head',
   ItAdmin: 'it-admin',
   EnterpriseAdmin: 'enterprise-admin',
+  Finance: 'finance',
 } as const;
 export type SystemRoleKey = (typeof SystemRoleKey)[keyof typeof SystemRoleKey];
 export const SYSTEM_ROLE_KEYS: SystemRoleKey[] = Object.values(SystemRoleKey);
@@ -46,6 +47,7 @@ export const SYSTEM_ROLE_NAMES: Record<SystemRoleKey, string> = {
   [SystemRoleKey.ProcessHead]: 'Process Head',
   [SystemRoleKey.ItAdmin]: 'IT Admin',
   [SystemRoleKey.EnterpriseAdmin]: 'Enterprise Admin',
+  [SystemRoleKey.Finance]: 'Finance',
 };
 
 /** Seed departments created at tenant activation — PRD §4.3. */
@@ -74,6 +76,8 @@ export const PermissionKey = {
   ManageLeaveQuotas: 'manage_leave_quotas',
   ConfigureForms: 'configure_forms',
   ManageOrg: 'manage_org',
+  ManageHolidays: 'manage_holidays',
+  ViewAttendanceReport: 'view_attendance_report',
 } as const;
 export type PermissionKey = (typeof PermissionKey)[keyof typeof PermissionKey];
 
@@ -106,6 +110,8 @@ export const PERMISSION_CATALOG: PermissionGroup[] = [
       { key: PermissionKey.ManageLeaveQuotas, label: 'Manage leave quotas' },
       { key: PermissionKey.ConfigureForms, label: 'Configure forms / routing' },
       { key: PermissionKey.ManageOrg, label: 'Manage users, roles & departments' },
+      { key: PermissionKey.ManageHolidays, label: 'Manage company holidays' },
+      { key: PermissionKey.ViewAttendanceReport, label: 'View attendance report' },
     ],
   },
 ];
@@ -138,6 +144,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleKey, PermissionKey[]> = {
     PermissionKey.ApproveLeaveOver2Days,
     PermissionKey.CheckVisitor,
     PermissionKey.ManageLeaveQuotas,
+    PermissionKey.ManageHolidays,
   ],
   [SystemRoleKey.ProcessHead]: [
     PermissionKey.ViewAllForms,
@@ -157,6 +164,15 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleKey, PermissionKey[]> = {
     PermissionKey.ManageLeaveQuotas,
     PermissionKey.ConfigureForms,
     PermissionKey.ManageOrg,
+    PermissionKey.ManageHolidays,
+    PermissionKey.ViewAttendanceReport,
+  ],
+  // Attendance-report design decision: salary-adjacent report access is explicit (own role),
+  // not bundled into HR. Finance keeps the baseline every System role carries.
+  [SystemRoleKey.Finance]: [
+    PermissionKey.ViewAllForms,
+    PermissionKey.SubmitRequest,
+    PermissionKey.ViewAttendanceReport,
   ],
 };
 
@@ -1432,3 +1448,78 @@ export type CheckInWithSignatureRequest = z.infer<typeof checkInWithSignatureReq
 
 export const signedUrlResponseSchema = z.object({ url: z.string() });
 export type SignedUrlResponse = z.infer<typeof signedUrlResponseSchema>;
+
+// ── Holidays & Attendance Report (attendance-report, Finance payroll) ──
+/** A calendar day as `YYYY-MM-DD` — must be a real date (rejects e.g. 2026-02-30). */
+export const holidayDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
+  .refine((s) => {
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  }, 'Not a valid calendar date');
+
+export const holidayCreateSchema = z.object({
+  date: holidayDateSchema,
+  name: z.string().trim().min(1).max(100),
+});
+export type HolidayCreate = z.infer<typeof holidayCreateSchema>;
+
+export const holidayUpdateSchema = holidayCreateSchema
+  .partial()
+  .refine((v) => v.date !== undefined || v.name !== undefined, 'At least one field is required');
+export type HolidayUpdate = z.infer<typeof holidayUpdateSchema>;
+
+export const holidayListQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100),
+});
+export type HolidayListQuery = z.infer<typeof holidayListQuerySchema>;
+
+/** `date` is a plain `YYYY-MM-DD` calendar day, matching `AbsenceEntryDto.startDate`. */
+export const holidayDtoSchema = z.object({
+  id: z.string(),
+  date: z.string(),
+  name: z.string(),
+});
+export type HolidayDto = z.infer<typeof holidayDtoSchema>;
+
+export const attendanceReportQuerySchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Expected YYYY-MM'),
+  departmentId: z.string().optional(),
+  /** false/absent → Active users only; true additionally includes Inactive/Suspended (never Pending). */
+  includeInactive: queryBoolean,
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type AttendanceReportQuery = z.infer<typeof attendanceReportQuerySchema>;
+
+/** Day figures move in 0.5 steps (half-days); `payableDays = workingDays − unpaidLeaveDays`. */
+export const attendanceReportRowSchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  departments: z.array(z.string()),
+  status: z.string(),
+  joinedAt: z.string(),
+  workingDays: z.number(),
+  wfhDays: z.number(),
+  paidLeaveDays: z.number(),
+  unpaidLeaveDays: z.number(),
+  officeDays: z.number(),
+  payableDays: z.number(),
+});
+export type AttendanceReportRow = z.infer<typeof attendanceReportRowSchema>;
+
+export const attendanceReportResponseSchema = z.object({
+  month: z.string(),
+  isPartialMonth: z.boolean(),
+  calendarDays: z.number(),
+  weekendDays: z.number(),
+  holidayCount: z.number(),
+  workingDays: z.number(),
+  rows: z.array(attendanceReportRowSchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type AttendanceReportResponse = z.infer<typeof attendanceReportResponseSchema>;
