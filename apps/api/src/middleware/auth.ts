@@ -65,3 +65,13 @@ export function requireItAdmin(req: Request, _res: Response, next: NextFunction)
   }
   next();
 }
+
+/** Require the caller to hold at least one of the given roles. */
+export function requireAnyRole(roles: string[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.user?.tenantId || !roles.some((role) => req.user!.roles.includes(role))) {
+      return next(new HttpError(403, `One of these roles is required: ${roles.join(', ')}`));
+    }
+    next();
+  };
+}
