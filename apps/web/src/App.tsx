@@ -159,7 +159,14 @@ export default function App() {
         <Route
           path="/organization/absence-calendar"
           element={
-            <RequireRole role={SystemRoleKey.EnterpriseAdmin}>
+            <RequireRole
+              role={[
+                SystemRoleKey.EnterpriseAdmin,
+                SystemRoleKey.HrHead,
+                SystemRoleKey.ProjectManager,
+                SystemRoleKey.TechLead,
+              ]}
+            >
               <AbsenceCalendar />
             </RequireRole>
           }
