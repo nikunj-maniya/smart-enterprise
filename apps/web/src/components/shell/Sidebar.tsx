@@ -157,6 +157,10 @@ export function Sidebar() {
               <SidebarLink key={item.to} {...item} />
             ))}
             {isHrHead && <SidebarLink to="/requests/absences" label="Absences" icon={CalendarDays} />}
+            {/* Enterprise Admin already sees this under ORGANIZATION below — avoid a duplicate entry. */}
+            {isReportsViewer && !isEnterpriseAdmin && (
+              <SidebarLink to="/organization/absence-calendar" label="Absence Calendar" icon={CalendarRange} />
+            )}
             {isReportsViewer && <SidebarLink to="/reports" label="Reports" icon={BarChart3} />}
           </div>
         )}

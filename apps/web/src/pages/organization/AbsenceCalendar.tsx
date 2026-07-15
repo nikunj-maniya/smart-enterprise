@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { TriangleAlert } from 'lucide-react';
-import type { AbsenceEntryDto, DepartmentsResponse, OverCapDayDto, ProjectsResponse } from '@se/shared';
+import { SystemRoleKey, type AbsenceEntryDto, type DepartmentsResponse, type OverCapDayDto, type ProjectsResponse } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { AgendaView } from '@/components/absences/AgendaView';
 import { DayDetailPanel } from '@/components/absences/DayDetailPanel';
@@ -21,10 +21,12 @@ import { ErrorState, InitialsAvatar } from '@/pages/requests/shared';
 const EMPTY_FILTERS: AbsenceFilters = { departmentId: '', projectId: '', type: '', personId: '' };
 
 /**
- * Admin Absence Calendar (absence-visibility, Enterprise Admin only): availability-only view of
- * the tenant's leave/WFH calendar — the `/absences` response never includes `reason` at the
- * `management` scope, so this screen never renders one — plus the over-concurrent-cap warning
- * panel, which also flags the affected days directly in the grid.
+ * Absence Calendar (absence-visibility: Enterprise Admin, HR Head, Project Manager, Tech Lead):
+ * availability-only view of the tenant's leave/WFH calendar — this screen never renders a
+ * `reason`, even for HR viewers whose `/absences` response does include one — plus the
+ * over-concurrent-cap warning panel, which also flags the affected days directly in the grid.
+ * The over-cap panel is HR/EA only (`getOverCapDays` 403s a `pm-tl` viewer by design, per
+ * absences.service.ts) — skipped entirely for Project Manager/Tech Lead viewers.
  */
 export default function AbsenceCalendar() {
   const { user } = useAuth();
@@ -42,6 +44,8 @@ export default function AbsenceCalendar() {
   const [selectedDay, setSelectedDay] = React.useState<{ dateIso: string; rows: AbsenceEntryDto[] } | null>(null);
 
   const grid = React.useMemo(() => getMonthGrid(month), [month]);
+  const canSeeOverCap =
+    (user?.roles.includes(SystemRoleKey.EnterpriseAdmin) ?? false) || (user?.roles.includes(SystemRoleKey.HrHead) ?? false);
 
   React.useEffect(() => {
     apiFetch<DepartmentsResponse>('/departments?pageSize=100').then((res) =>
@@ -74,11 +78,12 @@ export default function AbsenceCalendar() {
   }, [load]);
 
   React.useEffect(() => {
+    if (!canSeeOverCap) return;
     setOverCapError(null);
     getOverCapDays({ from: grid.from, to: grid.to, projectId: filters.projectId || undefined })
       .then((res) => setOverCapDays(res.days))
       .catch((err) => setOverCapError(err instanceof ApiError ? err.message : 'Unable to load the over-cap warnings.'));
-  }, [grid, filters.projectId]);
+  }, [grid, filters.projectId, canSeeOverCap]);
 
   const people = React.useMemo(() => {
     const seen = new Map<string, string>();
@@ -169,7 +174,7 @@ export default function AbsenceCalendar() {
             </div>
           </div>
 
-          {overCapError ? (
+          {canSeeOverCap && (overCapError ? (
             <div className="rounded-[14px] border border-line-soft bg-surface p-[18px] shadow-card text-[12.5px] text-danger">
               {overCapError}
             </div>
@@ -195,7 +200,7 @@ export default function AbsenceCalendar() {
                 </div>
               </div>
             )
-          )}
+          ))}
         </div>
       </div>
 
