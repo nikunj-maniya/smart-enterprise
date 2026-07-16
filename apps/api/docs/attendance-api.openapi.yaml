@@ -1,0 +1,361 @@
+openapi: 3.0.3
+info:
+  title: Smart Enterprise — Attendance Report & Holidays API
+  description: >
+    Endpoints added by the attendance-report OpenSpec change: the company-holiday
+    master and the Finance payable-days report. All endpoints are tenant-scoped via
+    the caller's JWT; a platform System Admin (no tenant) receives 403 everywhere.
+    Day semantics: all dates are calendar days (YYYY-MM-DD) computed in UTC;
+    payableDays = workingDays − unpaidLeaveDays; overlapping approved requests
+    never double-count a day (precedence: unpaid leave > paid leave > WFH).
+  version: 1.0.0
+servers:
+  - url: http://localhost:4000
+    description: Local development (API_PORT)
+tags:
+  - name: Holidays
+    description: Company-holiday master. Viewing is open to any tenant user; writes require HR Head or Enterprise Admin (manage_holidays).
+  - name: Attendance Report
+    description: Finance payable-days report. Requires the finance or enterprise-admin role (view_attendance_report). Never exposes leave reasons.
+
+paths:
+  /holidays:
+    get:
+      tags: [Holidays]
+      summary: List the tenant's holidays for a calendar year
+      operationId: listHolidays
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, minimum: 2000, maximum: 2100 }
+          example: 2026
+      responses:
+        '200':
+          description: Holidays sorted by date ascending.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows:
+                    type: array
+                    items: { $ref: '#/components/schemas/Holiday' }
+              example:
+                rows:
+                  - { id: cmrly22b00001rtt16kqp2o69, date: '2026-01-26', name: Republic Day }
+                  - { id: cmrly22b00002rtt1a9dm3xk1, date: '2026-06-15', name: Founders Day }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Caller has no tenant context (platform System Admin).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Tenant context required }
+    post:
+      tags: [Holidays]
+      summary: Create a holiday
+      description: >
+        Weekend dates are accepted but have no effect on working-day math (documented
+        no-op). One holiday per tenant per date, enforced by a DB unique constraint.
+        Audit-logged.
+      operationId: createHoliday
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HolidayCreate' }
+            example: { date: '2026-06-15', name: Founders Day }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Holiday' }
+              example: { id: cmrly22b00001rtt16kqp2o69, date: '2026-06-15', name: Founders Day }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenRole' }
+        '409':
+          description: A holiday already exists on this date for the tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A holiday already exists on this date }
+  /holidays/{id}:
+    put:
+      tags: [Holidays]
+      summary: Update a holiday's date and/or name
+      description: At least one of date/name is required. Audit-logged.
+      operationId: updateHoliday
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HolidayUpdate' }
+            example: { name: Founders Day (observed) }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Holiday' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenRole' }
+        '404': { $ref: '#/components/responses/HolidayNotFound' }
+        '409':
+          description: The new date collides with an existing holiday.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A holiday already exists on this date }
+    delete:
+      tags: [Holidays]
+      summary: Delete a holiday
+      description: Audit-logged. Deleting a past holiday retroactively changes historical reports (documented v1 trade-off).
+      operationId: deleteHoliday
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted. No body. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenRole' }
+        '404': { $ref: '#/components/responses/HolidayNotFound' }
+
+  /reports/attendance:
+    get:
+      tags: [Attendance Report]
+      summary: Per-employee payable days for a calendar month (paginated)
+      description: >
+        One row per employee, sorted by name. Only Approved leave/WFH requests count;
+        ranges are clipped to the month and counted on working days only; half-day
+        dates count 0.5. includeInactive=true additionally includes Inactive and
+        Suspended users (never Pending). The current month is allowed and flagged
+        isPartialMonth: true. No pro-rating for mid-month joiners/leavers — rows
+        carry status and joinedAt for manual adjustment.
+      operationId: getAttendanceReport
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          example: '2026-06'
+        - name: departmentId
+          in: query
+          required: false
+          schema: { type: string }
+          description: Must belong to the caller's tenant; otherwise 400 "Unknown department".
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: string, enum: ['true', 'false'] }
+          description: Query-string boolean; anything other than "true"/"false" is treated as absent.
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: The month's report page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceReportResponse' }
+              example:
+                month: '2026-06'
+                isPartialMonth: false
+                calendarDays: 30
+                weekendDays: 8
+                holidayCount: 1
+                workingDays: 21
+                rows:
+                  - userId: cmrly1j50000orth7ijkd8dic
+                    name: Asha Patel
+                    email: asha@acme.com
+                    departments: [Engineering]
+                    status: Active
+                    joinedAt: '2025-11-03'
+                    workingDays: 21
+                    wfhDays: 4
+                    paidLeaveDays: 1.5
+                    unpaidLeaveDays: 2
+                    officeDays: 13.5
+                    payableDays: 19
+                total: 143
+                page: 1
+                pageSize: 20
+        '400':
+          description: Validation failure, a future month, or an unknown department.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                futureMonth: { value: { error: Cannot report on a future month } }
+                unknownDepartment: { value: { error: Unknown department } }
+                badMonth:
+                  value:
+                    error: Validation failed
+                    details: { formErrors: [], fieldErrors: { month: [Expected YYYY-MM] } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenAttendance' }
+  /reports/attendance/export:
+    get:
+      tags: [Attendance Report]
+      summary: CSV export of the attendance report (all rows, no pagination)
+      description: >
+        Same authorization and query rules as the JSON view, minus page/pageSize.
+        Values are identical to the JSON figures. Cells are RFC 4180-quoted and
+        formula-prefixed cells (=, +, -, @) are neutralized with a leading apostrophe.
+        Columns: Employee, Email, Departments, Status, Joined, Working Days, WFH Days,
+        Paid Leave, Unpaid Leave (LWP), Office Days, Payable Days.
+      operationId: exportAttendanceCsv
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          example: '2026-06'
+        - name: departmentId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: string, enum: ['true', 'false'] }
+      responses:
+        '200':
+          description: >
+            CSV attachment (Content-Disposition: attachment; filename="attendance-<YYYY-MM>.csv").
+          content:
+            text/csv:
+              schema: { type: string }
+              example: |
+                Employee,Email,Departments,Status,Joined,Working Days,WFH Days,Paid Leave,Unpaid Leave (LWP),Office Days,Payable Days
+                Asha Patel,asha@acme.com,Engineering,Active,2025-11-03,21,4,1.5,2,13.5,19
+        '400':
+          description: Validation failure, a future month, or an unknown department.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenAttendance' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from POST /auth/login.
+  schemas:
+    Holiday:
+      type: object
+      required: [id, date, name]
+      properties:
+        id: { type: string }
+        date: { type: string, format: date, description: Calendar day (YYYY-MM-DD, UTC) }
+        name: { type: string }
+    HolidayCreate:
+      type: object
+      required: [date, name]
+      properties:
+        date:
+          type: string
+          format: date
+          description: Must be a real calendar date (2026-02-30 is rejected; Feb 29 only in leap years).
+        name: { type: string, minLength: 1, maxLength: 100, description: Trimmed server-side. }
+    HolidayUpdate:
+      type: object
+      minProperties: 1
+      description: At least one field is required.
+      properties:
+        date: { type: string, format: date }
+        name: { type: string, minLength: 1, maxLength: 100 }
+    AttendanceReportRow:
+      type: object
+      required: [userId, name, email, departments, status, joinedAt, workingDays, wfhDays, paidLeaveDays, unpaidLeaveDays, officeDays, payableDays]
+      properties:
+        userId: { type: string }
+        name: { type: string }
+        email: { type: string }
+        departments: { type: array, items: { type: string } }
+        status: { type: string, enum: [Active, Inactive, Suspended] }
+        joinedAt: { type: string, format: date, description: User.createdAt — proxy for join date (no employment dates in v1). }
+        workingDays: { type: number, description: The month baseline — same value for every row. }
+        wfhDays: { type: number, description: 0.5 steps. }
+        paidLeaveDays: { type: number, description: 0.5 steps; leave types with isPaid=true. }
+        unpaidLeaveDays: { type: number, description: 0.5 steps; LWP (isPaid=false). }
+        officeDays: { type: number, description: 'workingDays − paid − unpaid − wfh, floored at 0.' }
+        payableDays: { type: number, description: 'workingDays − unpaidLeaveDays.' }
+    AttendanceReportResponse:
+      type: object
+      required: [month, isPartialMonth, calendarDays, weekendDays, holidayCount, workingDays, rows, total, page, pageSize]
+      properties:
+        month: { type: string, example: '2026-06' }
+        isPartialMonth: { type: boolean, description: True only when the queried month is the current UTC month. }
+        calendarDays: { type: integer }
+        weekendDays: { type: integer, description: Saturdays + Sundays (fixed rule, v1). }
+        holidayCount: { type: integer, description: Tenant holidays falling on a weekday. }
+        workingDays: { type: integer, description: calendarDays − weekendDays − holidayCount. }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/AttendanceReportRow' }
+        total: { type: integer, description: Total matching employees (all pages). }
+        page: { type: integer }
+        pageSize: { type: integer }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        details:
+          description: 'Present on validation failures: Zod flatten() output ({ formErrors, fieldErrors }).'
+          type: object
+  responses:
+    Unauthorized:
+      description: Missing, malformed, or expired bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: Missing or invalid Authorization header }
+    ForbiddenRole:
+      description: Caller lacks HR Head / Enterprise Admin (manage_holidays), or has no tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'One of these roles is required: hr-head, enterprise-admin' }
+    ForbiddenAttendance:
+      description: Caller lacks finance / enterprise-admin (view_attendance_report), or has no tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'One of these roles is required: finance, enterprise-admin' }
+    HolidayNotFound:
+      description: No holiday with this id in the caller's tenant (foreign-tenant ids also 404).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: Holiday not found }
+    ValidationFailed:
+      description: Request failed Zod validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: Validation failed
+            details: { formErrors: [], fieldErrors: { date: [Not a valid calendar date] } }

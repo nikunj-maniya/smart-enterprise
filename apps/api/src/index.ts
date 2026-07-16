@@ -20,6 +20,8 @@ import { formsRouter } from './modules/forms/forms.routes.js';
 import { requestsRouter } from './modules/requests/requests.routes.js';
 import { escalationRulesRouter } from './modules/escalation-rules/escalation-rules.routes.js';
 import { leaveTypesRouter } from './modules/leave-types/leave-types.routes.js';
+import { holidaysRouter } from './modules/holidays/holidays.routes.js';
+import { mountApiDocs } from './docs/swagger.js';
 import { leaveBalancesRouter } from './modules/leave-balances/leave-balances.routes.js';
 import { frontDeskRouter } from './modules/front-desk/front-desk.routes.js';
 import { itemCatalogRouter } from './modules/item-catalog/item-catalog.routes.js';
@@ -61,6 +63,8 @@ app.get('/health', (_req, res) => {
   res.json(body);
 });
 
+mountApiDocs(app);
+
 app.use('/auth', authRateLimiter, authRouter);
 app.use('/registrations', registrationsRouter);
 app.use('/overview', overviewRouter);
@@ -77,6 +81,7 @@ app.use('/forms', formsRouter);
 app.use('/requests', requestsRouter);
 app.use('/escalation-rules', escalationRulesRouter);
 app.use('/leave-types', leaveTypesRouter);
+app.use('/holidays', holidaysRouter);
 app.use('/leave-balances', leaveBalancesRouter);
 app.use('/front-desk', frontDeskRouter);
 app.use('/item-catalog', itemCatalogRouter);

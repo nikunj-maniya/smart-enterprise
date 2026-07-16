@@ -68,6 +68,7 @@ model Tenant {
   escalationRules EscalationRule[]
   itemCatalog ItemCatalog[]
   slackConfig SlackConfig?
+  holidays    Holiday[]
 }
 
 // Shareable employee self-registration link — at most one active link per tenant.
@@ -262,6 +263,21 @@ model LeaveBalance {
   leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
 
   @@unique([userId, leaveTypeId, period])
+}
+
+// Company holidays (attendance-report): weekday holidays reduce the working-day baseline the
+// attendance report computes payable days from. `date` is a calendar day stored at UTC midnight
+// (same convention as Request.startDate); the unique also serves tenant-scoped lookups.
+model Holiday {
+  id        String   @id @default(cuid())
+  tenantId  String
+  date      DateTime
+  name      String
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, date])
 }
 
 // ── Form engine (metadata) ─────────────────────────────────

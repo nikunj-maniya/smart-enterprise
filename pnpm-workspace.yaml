@@ -7,6 +7,8 @@ packages:
 allowBuilds:
   "@prisma/client": true
   "@prisma/engines": true
+  # Telemetry-only postinstall (swagger-ui-express transitive) — keep blocked.
+  '@scarf/scarf': false
   argon2: true
   esbuild: true
   # Wasn't in the old onlyBuiltDependencies allow-list either — keep its behavior unchanged
