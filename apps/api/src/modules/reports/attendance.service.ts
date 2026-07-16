@@ -20,8 +20,8 @@ function userStatusFilter(includeInactive: boolean | undefined): UserStatus[] {
     : [UserStatus.Active];
 }
 
-/** `half_day_dates` / `half_wfh_dates` payload values, normalized to `YYYY-MM-DD`. */
-function halfDayDatesOf(payload: unknown, formKey: string): string[] {
+/** `half_day_dates` / `half_wfh_dates` payload values, normalized to `YYYY-MM-DD`. Exported for tests. */
+export function halfDayDatesOf(payload: unknown, formKey: string): string[] {
   const data = (payload ?? {}) as Record<string, unknown>;
   const raw = formKey === 'wfh' ? data.half_wfh_dates : data.half_day_dates;
   if (!Array.isArray(raw)) return [];
@@ -177,8 +177,8 @@ export async function getAttendanceReport(
   };
 }
 
-/** Cell guard for a payroll CSV opened in Excel: quote per RFC and neutralize formula prefixes. */
-function csvCell(value: string): string {
+/** Cell guard for a payroll CSV opened in Excel: quote per RFC and neutralize formula prefixes. Exported for tests. */
+export function csvCell(value: string): string {
   const guarded = /^[=+\-@]/.test(value) ? `'${value}` : value;
   return /[",\n]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded;
 }

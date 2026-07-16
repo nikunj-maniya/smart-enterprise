@@ -14,6 +14,8 @@ Finance needs payable days per employee per month to credit salaries. The system
 **Non-Goals:**
 - Punch-in/check-in tracking, payroll amounts/salary math, pro-rating by employment dates (User has no join/exit dates), configurable weekend rules, Excel export (CSV opens in Excel), and changes to leave-balance ledger math.
 - Real-time updates (reviewed and rejected): the report is an on-demand snapshot of settled history consumed as CSV; holiday CRUD is low-frequency with 409-backed conflict handling. The existing Socket.IO layer stays untouched by this feature; if staleness ever bites, add a "Data as of / Refresh" affordance — not a transport.
+- Background processing (reviewed and rejected): report + export are bounded synchronous reads (≤4 batched queries/page; single-pass CSV at realistic headcounts); no external calls, schedule, or retry-worthy side effects — none of what the existing `jobs/` workers exist for. Revisit only at ~10k+-employee exports (async export job → MinIO, jobId `attendance-export:<tenantId>:<month>`) or a scheduled-delivery requirement (repeatable job per `slack-digest.job.ts`).
+- Redis caching (reviewed and rejected): the report is a cold, high-cardinality-key read (a few runs/month around payroll) whose inputs span approvals, holidays, leave types, users, and departments — a huge invalidation surface — and payroll tolerates zero staleness ("cache immutable past months" is a trap: retro-approvals/holiday edits legitimately change them). Auth resolution on these routes already rides the existing 30s `auth:user:<id>` cache. Revisit only for a genuinely hot shared projection (e.g. a per-tenant month-summary dashboard widget).
 
 ## Decisions
 
