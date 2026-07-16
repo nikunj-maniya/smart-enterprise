@@ -22,12 +22,12 @@
 
 ## 4. Web
 
-- [ ] 4.1 Check the Claude Design prototype (DesignSync) for attendance-report and holiday-master screens; follow existing reports/masters patterns if absent
-- [ ] 4.2 Holiday master screen for HR Head / Enterprise Admin (list by year, create/edit/delete, duplicate-date and validation errors)
-- [ ] 4.3 Attendance report screen for Finance / Enterprise Admin (month picker capped at current month, department filter, includeInactive toggle, paginated table, partial-month warning, CSV download)
-- [ ] 4.4 Navigation/route guards so only the granted roles see the new screens
+- [x] 4.1 Check the Claude Design prototype (DesignSync) for attendance-report and holiday-master screens; follow existing reports/masters patterns if absent
+- [x] 4.2 Holiday master screen for HR Head / Enterprise Admin (list by year, create/edit/delete, duplicate-date and validation errors)
+- [x] 4.3 Attendance report screen for Finance / Enterprise Admin (month picker capped at current month, department filter, includeInactive toggle, paginated table, partial-month warning, CSV download)
+- [x] 4.4 Navigation/route guards so only the granted roles see the new screens
 
 ## 5. Verify
 
-- [ ] 5.1 Typecheck, lint, and build pass across the workspace
+- [x] 5.1 Typecheck, lint, and build pass across the workspace
 - [ ] 5.2 End-to-end check: seed a holiday, approve leave (paid, LWP, half-day) and WFH spanning weekends/month boundaries, and confirm JSON + CSV figures match the spec scenarios; confirm 403s for ungranted roles

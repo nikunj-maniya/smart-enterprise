@@ -19,8 +19,10 @@ import {
   Package,
   CalendarDays,
   CalendarRange,
+  CalendarCheck,
   MessageSquare,
   BarChart3,
+  PartyPopper,
   type LucideIcon,
 } from 'lucide-react';
 import { SystemRoleKey } from '@se/shared';
@@ -118,6 +120,7 @@ export function Sidebar() {
   const { pendingCount } = useRegistrationsCount();
   const isEnterpriseAdmin = user?.roles.includes(SystemRoleKey.EnterpriseAdmin) ?? false;
   const isHrHead = user?.roles.includes(SystemRoleKey.HrHead) ?? false;
+  const isFinance = user?.roles.includes(SystemRoleKey.Finance) ?? false;
   // Same viewer set `resolveAbsenceScope` (reports/absences visibility policy) authorizes.
   const isReportsViewer =
     isEnterpriseAdmin ||
@@ -162,6 +165,9 @@ export function Sidebar() {
               <SidebarLink to="/organization/absence-calendar" label="Absence Calendar" icon={CalendarRange} />
             )}
             {isReportsViewer && <SidebarLink to="/reports" label="Reports" icon={BarChart3} />}
+            {(isFinance || isEnterpriseAdmin) && (
+              <SidebarLink to="/reports/attendance" label="Attendance" icon={CalendarCheck} />
+            )}
           </div>
         )}
 
@@ -183,16 +189,16 @@ export function Sidebar() {
           </>
         )}
 
-        {/* Organization section — Enterprise Admin only */}
-        {isEnterpriseAdmin && (
+        {/* Organization section — Enterprise Admin, plus HR Head for Holidays alone */}
+        {(isEnterpriseAdmin || isHrHead) && (
           <>
             <div className="px-[10px] pb-[6px] pt-4 text-[11px] font-semibold tracking-[.6px] text-white/40">
               ORGANIZATION
             </div>
             <div className="flex flex-col gap-[3px]">
-              {organizationNav.map((item) => (
-                <SidebarLink key={item.to} {...item} />
-              ))}
+              {isEnterpriseAdmin &&
+                organizationNav.map((item) => <SidebarLink key={item.to} {...item} />)}
+              <SidebarLink to="/organization/holidays" label="Holidays" icon={PartyPopper} />
             </div>
           </>
         )}
