@@ -216,8 +216,10 @@ paths:
       tags: [Attendance Report]
       summary: CSV export of the attendance report (all rows, no pagination)
       description: >
-        Same authorization and query rules as the JSON view, minus page/pageSize.
-        Values are identical to the JSON figures. Cells are RFC 4180-quoted and
+        Same authorization and query rules as the JSON view, minus page/pageSize
+        (accepted but ignored — all rows are always exported; invalid values such
+        as page=0 still fail validation with 400). Values are identical to the
+        JSON figures. Cells are RFC 4180-quoted and
         formula-prefixed cells (=, +, -, @) are neutralized with a leading apostrophe.
         Columns: Employee, Email, Departments, Status, Joined, Working Days, WFH Days,
         Paid Leave, Unpaid Leave (LWP), Office Days, Payable Days.

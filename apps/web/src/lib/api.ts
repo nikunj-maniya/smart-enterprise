@@ -4,6 +4,8 @@ import type {
   AbsenceRangeResponse,
   ApprovalQueueResponse,
   ApprovalQueueTab,
+  AttendanceReportQuery,
+  AttendanceReportResponse,
   CheckInWithSignatureRequest,
   CreateItemCatalogRequest,
   DecisionRequestInput,
@@ -15,6 +17,9 @@ import type {
   FulfilmentQueueResponse,
   FulfilmentQueueTab,
   GlobalSearchResponse,
+  HolidayCreate,
+  HolidayDto,
+  HolidayUpdate,
   ItemCatalogDto,
   LeaveBalanceDto,
   LeaveTypeDto,
@@ -343,4 +348,63 @@ export function checkInWithSignature(requestId: string, body: CheckInWithSignatu
 /** `GET /front-desk/:requestId/signature-url` — a fresh, short-lived signed URL to the stored signature. */
 export function getVisitorSignatureUrl(requestId: string) {
   return apiFetch<SignedUrlResponse>(`/front-desk/${requestId}/signature-url`);
+}
+
+/** `GET /holidays` (any tenant user) — the tenant's company holidays for a calendar year, sorted by date. */
+export function listHolidays(year: number) {
+  return apiFetch<{ rows: HolidayDto[] }>(`/holidays?year=${year}`);
+}
+
+/** `POST /holidays` — add a company holiday; refused (409) if one already exists on that date. */
+export function createHoliday(input: HolidayCreate) {
+  return apiFetch<HolidayDto>('/holidays', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+/** `PUT /holidays/:id` — rename and/or move a holiday; refused (409) if the new date is already taken. */
+export function updateHoliday(id: string, input: HolidayUpdate) {
+  return apiFetch<HolidayDto>(`/holidays/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+/** `DELETE /holidays/:id` — remove a holiday. */
+export function deleteHoliday(id: string) {
+  return apiFetch<void>(`/holidays/${id}`, { method: 'DELETE' });
+}
+
+/** `GET /reports/attendance` (Finance / Enterprise Admin) — per-employee payable-day figures for a month. */
+export function getAttendanceReport(query: AttendanceReportQuery) {
+  const params = new URLSearchParams({
+    month: query.month,
+    page: String(query.page),
+    pageSize: String(query.pageSize),
+  });
+  if (query.departmentId) params.set('departmentId', query.departmentId);
+  if (query.includeInactive) params.set('includeInactive', 'true');
+  return apiFetch<AttendanceReportResponse>(`/reports/attendance?${params.toString()}`);
+}
+
+/** `GET /reports/attendance/export` — downloads the full (unpaginated) attendance report as a CSV. */
+export async function downloadAttendanceCsv(
+  query: Omit<AttendanceReportQuery, 'page' | 'pageSize'>,
+): Promise<void> {
+  const params = new URLSearchParams({ month: query.month });
+  if (query.departmentId) params.set('departmentId', query.departmentId);
+  if (query.includeInactive) params.set('includeInactive', 'true');
+  const token = tokenStore.access;
+  const res = await fetch(`${API_URL}/reports/attendance/export?${params.toString()}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, `Export failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `attendance-${query.month}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

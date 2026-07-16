@@ -36,6 +36,8 @@ import FulfilmentQueue from '@/pages/requests/FulfilmentQueue';
 import AbsenceCalendar from '@/pages/organization/AbsenceCalendar';
 import SlackIntegration from '@/pages/organization/SlackIntegration';
 import Reports from '@/pages/requests/Reports';
+import AttendanceReport from '@/pages/requests/AttendanceReport';
+import Holidays from '@/pages/organization/Holidays';
 import { OfflineBanner } from '@/components/shell/OfflineBanner';
 import { useAuth } from '@/lib/auth';
 
@@ -88,6 +90,14 @@ export default function App() {
         <Route path="/requests/hr-signoffs" element={<HrSignoffs />} />
         <Route path="/requests/absences" element={<HrAbsences />} />
         <Route path="/reports" element={<Reports />} />
+        <Route
+          path="/reports/attendance"
+          element={
+            <RequireRole role={[SystemRoleKey.Finance, SystemRoleKey.EnterpriseAdmin]}>
+              <AttendanceReport />
+            </RequireRole>
+          }
+        />
         <Route path="/front-desk" element={<FrontDesk />} />
         <Route path="/requests/fulfilment-queue" element={<FulfilmentQueue />} />
         <Route path="/requests/new" element={<NewRequest />} />
@@ -168,6 +178,14 @@ export default function App() {
               ]}
             >
               <AbsenceCalendar />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/organization/holidays"
+          element={
+            <RequireRole role={[SystemRoleKey.HrHead, SystemRoleKey.EnterpriseAdmin]}>
+              <Holidays />
             </RequireRole>
           }
         />
