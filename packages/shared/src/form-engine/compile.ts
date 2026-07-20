@@ -27,6 +27,11 @@ interface CompiledField {
 interface CompiledDefinition {
   key: string;
   version: number;
+  /** Fingerprint of the definition's field options at compile time — catalog-sourced options
+   *  (departments / leave-types / item-catalog) are resolved live server-side and can change
+   *  WITHOUT a version bump, so a cached compile (whose option-membership refinements captured
+   *  the resolved lists) is only valid while those options are unchanged. */
+  optionsFingerprint: string;
   fields: CompiledField[];
 }
 
@@ -34,6 +39,10 @@ const cache = new Map<string, CompiledDefinition>();
 
 function cacheKey(def: FormDefinition): string {
   return `${def.id}:${def.version}`;
+}
+
+function optionsFingerprint(def: FormDefinition): string {
+  return JSON.stringify(def.sections.map((s) => s.fields.map((f) => f.options ?? null)));
 }
 
 function buildStringSchema(validation?: FieldValidation): z.ZodString {
@@ -109,11 +118,14 @@ function buildFieldSchema(field: FormField): z.ZodTypeAny | null {
   }
 }
 
-/** Compile a definition version's static parts, memoised per `(id, version)`. */
+/** Compile a definition version's static parts, memoised per `(id, version)` — recompiled (the
+ *  entry is replaced, so the cache stays bounded) when the definition's options changed since the
+ *  cached compile (see `CompiledDefinition.optionsFingerprint`). */
 export function compileDefinition(def: FormDefinition): CompiledDefinition {
   const key = cacheKey(def);
+  const fingerprint = optionsFingerprint(def);
   const cached = cache.get(key);
-  if (cached) return cached;
+  if (cached && cached.optionsFingerprint === fingerprint) return cached;
 
   const fields: CompiledField[] = [];
   for (const section of def.sections) {
@@ -125,7 +137,7 @@ export function compileDefinition(def: FormDefinition): CompiledDefinition {
       });
     }
   }
-  const compiled: CompiledDefinition = { key: def.key, version: def.version, fields };
+  const compiled: CompiledDefinition = { key: def.key, version: def.version, optionsFingerprint: fingerprint, fields };
   cache.set(key, compiled);
   return compiled;
 }

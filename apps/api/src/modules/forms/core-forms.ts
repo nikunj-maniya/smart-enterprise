@@ -11,14 +11,6 @@ function opts(...values: string[]) {
   return values.map((value) => ({ value, label: value }));
 }
 
-const LEAVE_TYPES = [
-  'Leaves available',
-  'LWP',
-  'Becoming a father',
-  'Becoming a mother',
-  'Getting married',
-];
-
 // Exported so `item-catalog.seed.ts` can seed these as the tenant's default `ItemCatalog` rows —
 // the IT form's item fields resolve their live options from that table, not from here (see
 // their `options: { source: 'item-catalog:...' }` marker below).
@@ -156,7 +148,12 @@ const leave: PublishDefinitionInput = {
           label: 'Type of leave',
           type: 'single-select',
           required: true,
-          options: opts(...LEAVE_TYPES),
+          // Resolved server-side from the tenant's `LeaveType` rows at read/submit time (same
+          // master-data pattern as the IT form's `item-catalog:*` sources below) — a Leave
+          // Policy create/rename applies instantly with no republish. Option value/label is the
+          // type NAME (`extractors.ts` stores the label into `Request.leaveTypeId`). See
+          // `forms.service.ts`'s catalog resolution.
+          options: { source: 'leave-types' },
         },
         { key: 'context', label: 'Context', type: 'textarea', required: true },
       ],

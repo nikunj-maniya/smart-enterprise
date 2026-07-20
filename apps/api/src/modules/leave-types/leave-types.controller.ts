@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { updateAbsenceCapRequestSchema, updateLeaveTypeRequestSchema } from '@se/shared';
+import { createLeaveTypeRequestSchema, updateAbsenceCapRequestSchema, updateLeaveTypeRequestSchema } from '@se/shared';
 import * as leaveTypesService from './leave-types.service.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
@@ -27,11 +27,30 @@ export async function updateAbsenceCap(req: Request, res: Response, next: NextFu
   }
 }
 
+export async function create(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = createLeaveTypeRequestSchema.parse(req.body);
+    const dto = await leaveTypesService.createLeaveType(req.user!.tenantId!, req.user!.id, body);
+    res.status(201).json(dto);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function update(req: Request, res: Response, next: NextFunction) {
   try {
     const body = updateLeaveTypeRequestSchema.parse(req.body);
     const dto = await leaveTypesService.updateLeaveType(req.user!.tenantId!, req.user!.id, req.params.id, body);
     res.json(dto);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function remove(req: Request, res: Response, next: NextFunction) {
+  try {
+    await leaveTypesService.deleteLeaveType(req.user!.tenantId!, req.user!.id, req.params.id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

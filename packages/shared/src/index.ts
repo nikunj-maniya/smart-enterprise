@@ -1053,10 +1053,19 @@ export const leaveTypeDtoSchema = z.object({
 });
 export type LeaveTypeDto = z.infer<typeof leaveTypeDtoSchema>;
 
-export const updateLeaveTypeRequestSchema = z.object({
+export const createLeaveTypeRequestSchema = z.object({
+  name: z.string().trim().min(1).max(100),
   quota: z.number().min(0),
+  isPaid: z.boolean(),
   carryForward: z.boolean(),
   halfDayAllowed: z.boolean(),
+});
+export type CreateLeaveTypeRequest = z.infer<typeof createLeaveTypeRequestSchema>;
+
+/** `name`/`isPaid` are optional so the inline row save (quota + toggles only) stays valid. */
+export const updateLeaveTypeRequestSchema = createLeaveTypeRequestSchema.partial({
+  name: true,
+  isPaid: true,
 });
 export type UpdateLeaveTypeRequest = z.infer<typeof updateLeaveTypeRequestSchema>;
 
