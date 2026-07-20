@@ -78,9 +78,11 @@ export async function seedTenantEscalationDefaults(tx: Prisma.TransactionClient,
   }
 }
 
-/** PRD §7.1 leave types (must match the seeded Leave form's `leave_type` select options
- *  verbatim — `extractPromotedColumns` stores the submitted label as `Request.leaveTypeId`,
- *  resolved back to a real `LeaveType` row by name at balance time, not by a real FK).
+/** PRD §7.1 default leave types. The Leave form's `leave_type` select resolves its options live
+ *  from the tenant's `LeaveType` rows (`{ source: 'leave-types' }` — see `forms.service.ts`'s
+ *  catalog resolution), so this list only seeds the master data. Option value/label is the type
+ *  NAME — `extractPromotedColumns` stores the submitted label as `Request.leaveTypeId`, resolved
+ *  back to a real `LeaveType` row by name at balance time, not by a real FK.
  *  Quotas/toggles are sensible defaults; an Enterprise Admin edits them on the Leave Policy page. */
 const LEAVE_TYPE_DEFAULTS: Array<{
   name: string;
@@ -114,7 +116,7 @@ export async function seedTenantLeaveTypes(tx: Prisma.TransactionClient, tenantI
 }
 
 /** Calendar-year balance period (Asia/Kolkata) — annual allocation, no accrual scheduling (design.md). */
-function currentLeavePeriod(): string {
+export function currentLeavePeriod(): string {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
   return new Date(Date.now() + IST_OFFSET_MS).getUTCFullYear().toString();
 }

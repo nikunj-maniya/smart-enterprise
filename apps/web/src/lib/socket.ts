@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import type { NotificationDto } from '@se/shared';
 import { tokenStore } from './api';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+const API_URL = import.meta.env?.VITE_API_URL ?? 'http://localhost:4000';
 
 let socket: Socket | null = null;
 

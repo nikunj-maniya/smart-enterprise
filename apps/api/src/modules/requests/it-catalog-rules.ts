@@ -8,10 +8,10 @@ const PAYLOAD_KEY: Record<'software' | 'hardware', string> = {
 };
 
 /**
- * Item selection isn't statically validated at compile time (a catalog-sourced field's options
- * aren't known until this DB lookup — see `forms.service.ts`'s catalog resolution, which only
- * runs for *rendering*, not submission). This is the authoritative check: every submitted item
- * name must be an active catalog entry for its branch (it-requests spec).
+ * Every submitted item name must be an active catalog entry for its branch (it-requests spec).
+ * `forms.service.ts`'s catalog resolution now runs for submission validation too (so
+ * `validatePayload` enum-checks these fields against the live catalog), but this check stays:
+ * it's the one that names the offending items in a user-facing per-branch message.
  */
 export async function assertItemsInActiveCatalog(
   tenantId: string,

@@ -114,28 +114,41 @@ function isDepartmentsSource(options: unknown): boolean {
   return (options as { source?: unknown }).source === 'departments';
 }
 
+/** A field's raw `options` JSON, when it's the `{ source: 'leave-types' }` marker. */
+function isLeaveTypesSource(options: unknown): boolean {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) return false;
+  return (options as { source?: unknown }).source === 'leave-types';
+}
+
+/** The section/field shape `resolveCatalogOptions` rewrites — satisfied by both the served
+ *  `FormDefinitionDto` (render paths) and the engine's `FormDefinition` (submission validation). */
+type ResolvableDefinition = { sections: Array<{ fields: Array<{ options?: unknown }> }> };
+
 /**
- * Resolves every `item-catalog:<type>` and `departments` marker field in a served definition into
- * a real options array, live from the tenant's `ItemCatalog` (design.md: "master data, not
- * form-field options" — an admin's catalog edit applies with no republish) and `Department` tables.
+ * Resolves every `item-catalog:<type>`, `departments`, and `leave-types` marker field in a
+ * definition into a real options array, live from the tenant's `ItemCatalog` (design.md: "master
+ * data, not form-field options" — an admin's catalog edit applies with no republish),
+ * `Department`, and `LeaveType` tables.
  * `includeArchived` is `true` only when rendering a specific pinned request (its own past
  * submission may name an item/department since archived — item-catalog spec's "past requests still
  * render it"); `false` for a fresh submission's blank form, which must only offer currently-active
  * options.
  */
-async function resolveCatalogOptions(tenantId: string, dto: FormDefinitionDto, includeArchived: boolean): Promise<FormDefinitionDto> {
+async function resolveCatalogOptions<T extends ResolvableDefinition>(tenantId: string, dto: T, includeArchived: boolean): Promise<T> {
   const types = new Set<string>();
   let needsDepartments = false;
+  let needsLeaveTypes = false;
   for (const s of dto.sections) {
     for (const f of s.fields) {
       const type = catalogSourceType(f.options);
       if (type) types.add(type);
       if (isDepartmentsSource(f.options)) needsDepartments = true;
+      if (isLeaveTypesSource(f.options)) needsLeaveTypes = true;
     }
   }
-  if (types.size === 0 && !needsDepartments) return dto;
+  if (types.size === 0 && !needsDepartments && !needsLeaveTypes) return dto;
 
-  const [items, departments] = await Promise.all([
+  const [items, departments, leaveTypes] = await Promise.all([
     types.size > 0
       ? prisma.itemCatalog.findMany({
           where: { tenantId, type: { in: [...types] }, ...(includeArchived ? {} : { archived: false }) },
@@ -148,6 +161,9 @@ async function resolveCatalogOptions(tenantId: string, dto: FormDefinitionDto, i
           orderBy: { name: 'asc' },
         })
       : [],
+    needsLeaveTypes
+      ? prisma.leaveType.findMany({ where: { tenantId }, orderBy: { name: 'asc' } })
+      : [],
   ]);
   const optionsByType = new Map<string, { value: string; label: string }[]>();
   for (const item of items) {
@@ -159,6 +175,12 @@ async function resolveCatalogOptions(tenantId: string, dto: FormDefinitionDto, i
   // submitted value verbatim into `Request.departmentId`, a true FK every other department-aware
   // read (absences, fulfilment, filters) joins against `Department.id`.
   const departmentOptions = departments.map((d) => ({ value: d.id, label: d.name }));
+  // `value` is the leave type's NAME, not its id — `extractors.ts` stores this field's submitted
+  // label verbatim into `Request.leaveTypeId`, resolved back to a `LeaveType` row by name at
+  // balance time (`leave-wfh-rules.ts` / `leave-balance-ledger.ts`). Leave types have no archived
+  // flag (`includeArchived` has no analogue): they're hard-deleted, and delete/rename are blocked
+  // while any request references the name, so a pinned past request's type always still exists.
+  const leaveTypeOptions = leaveTypes.map((lt) => ({ value: lt.name, label: lt.name }));
 
   return {
     ...dto,
@@ -166,11 +188,12 @@ async function resolveCatalogOptions(tenantId: string, dto: FormDefinitionDto, i
       ...s,
       fields: s.fields.map((f) => {
         if (isDepartmentsSource(f.options)) return { ...f, options: departmentOptions };
+        if (isLeaveTypesSource(f.options)) return { ...f, options: leaveTypeOptions };
         const type = catalogSourceType(f.options);
         return type ? { ...f, options: optionsByType.get(type) ?? [] } : f;
       }),
     })),
-  };
+  } as T;
 }
 
 /** GET /forms/:key — the tenant's full latest published definition for a key. */
@@ -213,7 +236,7 @@ function toFormDefinition(def: DefinitionWithGraph): FormDefinition {
   };
 }
 
-/** The tenant's latest published definition, ready for server-side (re)validation, plus id/version to pin and the status its state machine starts every new request in. A custom form without a configured status model falls back to the generic default so it stays submittable. */
+/** The tenant's latest published definition, ready for server-side (re)validation, plus id/version to pin and the status its state machine starts every new request in. Catalog-sourced options (`departments` / `leave-types` / `item-catalog:<type>`) are resolved live before validation — so `validatePayload` enum-checks against the tenant's current master data instead of treating a marker field as free text — with `includeArchived: false`, matching the options a fresh submission's blank form offers. A custom form without a configured status model falls back to the generic default so it stays submittable. */
 /**
  * Some core forms' first declared state is a pre-approval placeholder nobody but the requester
  * (who just submitted) could ever act on — e.g. Visitor's `Pre-Registered`, IT's `Requested` —
@@ -273,7 +296,7 @@ export async function getPublishedDefinitionForSubmission(
   return {
     id: def.id,
     version: def.version,
-    definition: toFormDefinition(def),
+    definition: await resolveCatalogOptions(tenantId, toFormDefinition(def), false),
     initialStatus,
     approvalWorkflow: def.approvalWorkflow
       ? { mode: def.approvalWorkflow.mode, stageRules: def.approvalWorkflow.stageRules }

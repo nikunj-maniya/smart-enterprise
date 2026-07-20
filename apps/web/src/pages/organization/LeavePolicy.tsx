@@ -1,10 +1,20 @@
 import * as React from 'react';
-import { Check } from 'lucide-react';
-import type { LeaveTypeDto } from '@se/shared';
+import { Check, PencilLine, Plus, Trash2 } from 'lucide-react';
+import type { CreateLeaveTypeRequest, LeaveTypeDto } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
+import { Overlay } from '@/components/ui/overlay';
+import { Switch } from '@/components/ui/switch';
 import { Toast, useToast } from '@/components/ui/toast';
-import { ApiError, getAbsenceCap, listLeaveTypes, updateAbsenceCap, updateLeaveType } from '@/lib/api';
+import {
+  ApiError,
+  createLeaveType,
+  deleteLeaveType,
+  getAbsenceCap,
+  listLeaveTypes,
+  updateAbsenceCap,
+  updateLeaveType,
+} from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
 /** Bottom-center toggle switch — mirrors the console Settings page's convention. */
@@ -29,6 +39,160 @@ function Toggle({ checked, disabled, onClick }: { checked: boolean; disabled?: b
   );
 }
 
+/** Modal toggle row — left label + muted sub, switch on the right (design's in-modal toggle convention). */
+function ToggleRow({
+  label,
+  sub,
+  checked,
+  onClick,
+}: {
+  label: string;
+  sub: string;
+  checked: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <div className="text-[13px] font-semibold text-ink-900">{label}</div>
+        <div className="text-xs text-ink-400">{sub}</div>
+      </div>
+      <Switch checked={checked} onCheckedChange={onClick} aria-label={label} />
+    </div>
+  );
+}
+
+/** Create/edit dialog for a leave type — `leaveType === null` means create. */
+function LeaveTypeModal({
+  leaveType,
+  onClose,
+  onSaved,
+}: {
+  leaveType: LeaveTypeDto | null;
+  onClose: () => void;
+  onSaved: (saved: LeaveTypeDto) => void;
+}) {
+  const [name, setName] = React.useState(leaveType?.name ?? '');
+  const [quota, setQuota] = React.useState(leaveType ? String(leaveType.quota) : '');
+  const [isPaid, setIsPaid] = React.useState(leaveType?.isPaid ?? true);
+  const [carryForward, setCarryForward] = React.useState(leaveType?.carryForward ?? false);
+  const [halfDayAllowed, setHalfDayAllowed] = React.useState(leaveType?.halfDayAllowed ?? false);
+  const [nameError, setNameError] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  async function onSave() {
+    setError(null);
+    setNameError(null);
+    const trimmed = name.trim();
+    if (!trimmed) return setNameError('Name is required.');
+    if (trimmed.length > 100) return setNameError('Name must be 100 characters or fewer.');
+    const quotaValue = Number(quota);
+    if (quota.trim() === '' || !Number.isFinite(quotaValue) || quotaValue < 0)
+      return setError('Annual quota must be zero or more.');
+    setBusy(true);
+    try {
+      const body: CreateLeaveTypeRequest = {
+        name: trimmed,
+        quota: quotaValue,
+        isPaid,
+        carryForward,
+        halfDayAllowed,
+      };
+      const saved = leaveType ? await updateLeaveType(leaveType.id, body) : await createLeaveType(body);
+      onSaved(saved);
+    } catch (err) {
+      // The duplicate-name conflict belongs next to the name field, not the generic footer slot.
+      if (err instanceof ApiError && err.status === 409) setNameError(err.message);
+      else setError(err instanceof ApiError ? err.message : 'Unable to save the leave type.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Overlay onClose={onClose} z={60}>
+      <div className="mx-auto w-full max-w-[480px] rounded-2xl bg-surface p-[26px] shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-[rgb(236,245,246)] text-brand">
+            {leaveType ? <PencilLine size={20} /> : <Plus size={20} />}
+          </div>
+          <div>
+            <div className="text-lg font-bold text-ink-900">
+              {leaveType ? 'Edit leave type' : 'New leave type'}
+            </div>
+            <div className="text-[13px] text-ink-400">
+              {leaveType
+                ? 'Rename the type or adjust its policy.'
+                : 'Paid types open balances for active employees this period.'}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-4">
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-semibold text-ink-900">Name</span>
+            <div className="flex h-11 items-center rounded-sm border border-line bg-surface px-3">
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Paternity Leave"
+                className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
+              />
+            </div>
+            {nameError && <span className="text-sm font-medium text-danger">{nameError}</span>}
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-sm font-semibold text-ink-900">Annual quota (days)</span>
+            <div className="flex h-11 items-center rounded-sm border border-line bg-surface px-3">
+              <input
+                type="number"
+                min={0}
+                value={quota}
+                onChange={(e) => setQuota(e.target.value)}
+                className="min-w-0 flex-1 border-none bg-transparent text-sm text-ink-900 outline-none"
+              />
+            </div>
+          </label>
+
+          <ToggleRow
+            label="Paid"
+            sub="Paid types carry a balance and deduct on approval."
+            checked={isPaid}
+            onClick={() => setIsPaid((v) => !v)}
+          />
+          <ToggleRow
+            label="Carry forward"
+            sub="Unused days roll over into the next period."
+            checked={carryForward}
+            onClick={() => setCarryForward((v) => !v)}
+          />
+          <ToggleRow
+            label="Half-day allowed"
+            sub="Employees can request half-day units of this type."
+            checked={halfDayAllowed}
+            onClick={() => setHalfDayAllowed((v) => !v)}
+          />
+        </div>
+
+        {error && <div className="mt-4 text-sm font-medium text-danger">{error}</div>}
+
+        <div className="mt-[22px] flex justify-end gap-3">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={onSave} disabled={busy}>
+            <Check size={16} />
+            {busy ? 'Saving…' : leaveType ? 'Save changes' : 'Create leave type'}
+          </Button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 interface RowEdit {
   quota: number;
   carryForward: boolean;
@@ -39,7 +203,7 @@ function toEdit(t: LeaveTypeDto): RowEdit {
   return { quota: t.quota, carryForward: t.carryForward, halfDayAllowed: t.halfDayAllowed };
 }
 
-const GRID = 'grid-cols-[1.6fr_1fr_0.9fr_1.1fr_1.1fr_0.9fr]';
+const GRID = 'grid-cols-[1.6fr_1fr_0.9fr_1.1fr_1.1fr_1.4fr]';
 
 export default function LeavePolicy() {
   const { user } = useAuth();
@@ -50,6 +214,13 @@ export default function LeavePolicy() {
   const [cap, setCap] = React.useState<number | null>(null);
   const [capInput, setCapInput] = React.useState('');
   const [savingCap, setSavingCap] = React.useState(false);
+  const [adding, setAdding] = React.useState(false);
+  const [editing, setEditing] = React.useState<LeaveTypeDto | null>(null);
+  const [deleting, setDeleting] = React.useState<LeaveTypeDto | null>(null);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  /** Per-row delete-blocked reason, learned from the API's 409 on an attempted delete. */
+  const [blocked, setBlocked] = React.useState<Record<string, string>>({});
   const { message, show } = useToast();
 
   const load = React.useCallback(() => {
@@ -117,13 +288,50 @@ export default function LeavePolicy() {
     }
   }
 
+  function onModalSaved(saved: LeaveTypeDto, created: boolean) {
+    setAdding(false);
+    setEditing(null);
+    load();
+    show(`${saved.name} ${created ? 'created' : 'updated'}`);
+  }
+
+  async function onConfirmDelete() {
+    if (!deleting) return;
+    const target = deleting;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteLeaveType(target.id);
+      setDeleting(null);
+      load();
+      show(`${target.name} deleted`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // In use — remember the reason so the row's delete affordance shows as blocked.
+        setBlocked((prev) => ({ ...prev, [target.id]: err.message }));
+        setDeleting(null);
+        show(err.message);
+      } else {
+        setDeleteError(err instanceof ApiError ? err.message : 'Unable to delete this leave type.');
+      }
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <>
-      <PageHeader
-        title="Leave Policy & Quotas"
-        subtitle="Configure annual quota, carry-forward, and half-day rules for each leave type."
-        breadcrumb={`Organization · ${user?.tenantName ?? ''}`}
-      />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <PageHeader
+          title="Leave Policy & Quotas"
+          subtitle="Configure annual quota, carry-forward, and half-day rules for each leave type."
+          breadcrumb={`Organization · ${user?.tenantName ?? ''}`}
+        />
+        <Button size="lg" onClick={() => setAdding(true)}>
+          <Plus size={18} />
+          Add leave type
+        </Button>
+      </div>
 
       <div className="mt-[22px] flex items-center justify-between gap-4 rounded-xl border border-line-soft bg-surface px-[22px] py-[15px] shadow-card">
         <div>
@@ -154,7 +362,7 @@ export default function LeavePolicy() {
 
       <div className="mt-[14px] overflow-x-auto rounded-xl border border-line-soft bg-surface shadow-card">
         <div
-          className={`grid ${GRID} min-w-[820px] bg-surface-muted px-[22px] py-[13px] text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400`}
+          className={`grid ${GRID} min-w-[880px] bg-surface-muted px-[22px] py-[13px] text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400`}
         >
           <span>Leave Type</span>
           <span>Quota</span>
@@ -174,7 +382,7 @@ export default function LeavePolicy() {
             return (
               <div
                 key={t.id}
-                className={`grid ${GRID} min-w-[820px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0`}
+                className={`grid ${GRID} min-w-[880px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0`}
               >
                 <span className="pr-3 text-sm font-semibold text-ink-900">{t.name}</span>
                 <span>
@@ -215,7 +423,7 @@ export default function LeavePolicy() {
                     }
                   />
                 </span>
-                <div className="flex justify-end">
+                <div className="flex items-center justify-end gap-2">
                   <Button
                     variant="secondary"
                     size="sm"
@@ -225,6 +433,33 @@ export default function LeavePolicy() {
                     <Check size={14} />
                     {savingId === t.id ? 'Saving…' : 'Save'}
                   </Button>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(t)}
+                    className="flex h-7 w-7 flex-none items-center justify-center rounded-[7px] border border-line text-ink-400 hover:bg-surface-muted"
+                    aria-label={`Edit ${t.name}`}
+                  >
+                    <PencilLine size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-disabled={!!blocked[t.id]}
+                    title={blocked[t.id]}
+                    onClick={() => {
+                      // A known-blocked row just resurfaces the reason instead of opening the confirm.
+                      if (blocked[t.id]) return show(blocked[t.id]);
+                      setDeleting(t);
+                      setDeleteError(null);
+                    }}
+                    className={`flex h-7 w-7 flex-none items-center justify-center rounded-[7px] border border-line ${
+                      blocked[t.id]
+                        ? 'cursor-not-allowed text-ink-300 opacity-60'
+                        : 'text-danger hover:bg-danger/10'
+                    }`}
+                    aria-label={`Delete ${t.name}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
             );
@@ -233,6 +468,44 @@ export default function LeavePolicy() {
       </div>
 
       {error && <div className="mt-3 text-sm font-medium text-danger">{error}</div>}
+
+      {(adding || editing) && (
+        <LeaveTypeModal
+          leaveType={editing}
+          onClose={() => {
+            setAdding(false);
+            setEditing(null);
+          }}
+          onSaved={(saved) => onModalSaved(saved, editing === null)}
+        />
+      )}
+
+      {deleting && (
+        <Overlay onClose={() => setDeleting(null)} z={60}>
+          <div className="mx-auto w-full max-w-[440px] rounded-xl bg-surface p-[26px] shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-[42px] w-[42px] flex-none items-center justify-center rounded-[10px] bg-danger/[0.12] text-danger">
+                <Trash2 size={22} />
+              </div>
+              <div className="text-lg font-bold text-ink-900">Delete leave type</div>
+            </div>
+            <div className="mt-[14px] text-[13.5px] leading-[1.6] text-ink-500">
+              Delete <strong>{deleting.name}</strong>? This can&apos;t be undone — its unused
+              balances are removed and employees can no longer request it.
+            </div>
+            {deleteError && <div className="mt-3 text-sm font-medium text-danger">{deleteError}</div>}
+            <div className="mt-[22px] flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setDeleting(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={onConfirmDelete} disabled={deleteBusy}>
+                {deleteBusy ? 'Deleting…' : 'Delete leave type'}
+              </Button>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
       <Toast message={message} />
     </>
   );

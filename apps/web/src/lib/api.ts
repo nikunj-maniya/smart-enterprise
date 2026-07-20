@@ -8,6 +8,7 @@ import type {
   AttendanceReportResponse,
   CheckInWithSignatureRequest,
   CreateItemCatalogRequest,
+  CreateLeaveTypeRequest,
   DecisionRequestInput,
   DirectoryProjectsResponse,
   DirectoryUsersResponse,
@@ -173,12 +174,25 @@ export function listLeaveTypes() {
   return apiFetch<LeaveTypeDto[]>('/leave-types');
 }
 
-/** `PUT /leave-types/:id` (Enterprise Admin only) — update a leave type's quota/carry-forward/half-day policy. */
+/** `POST /leave-types` (Enterprise Admin only) — add a leave type; refused (409) if the name is already taken. Opens balances for the tenant's active users when paid. */
+export function createLeaveType(body: CreateLeaveTypeRequest) {
+  return apiFetch<LeaveTypeDto>('/leave-types', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `PUT /leave-types/:id` (Enterprise Admin only) — update a leave type's name/paid flag and quota/carry-forward/half-day policy. */
 export function updateLeaveType(id: string, body: UpdateLeaveTypeRequest) {
   return apiFetch<LeaveTypeDto>(`/leave-types/${id}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   });
+}
+
+/** `DELETE /leave-types/:id` (Enterprise Admin only) — refused (409) while requests reference the type or balances show consumption. */
+export function deleteLeaveType(id: string) {
+  return apiFetch<void>(`/leave-types/${id}`, { method: 'DELETE' });
 }
 
 /** `GET /leave-balances/me` — the caller's own paid leave-type balances (My Requests balance cards). */

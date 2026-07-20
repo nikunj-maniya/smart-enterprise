@@ -12,7 +12,8 @@ export const globalRateLimiter = rateLimit({
  *  self-registration) — the paths credential-stuffing and scraping actually target. */
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60_000,
-  limit: 20,
+  // Env-tunable so e2e runs (many rapid real logins) can raise it; production default stays 20.
+  limit: Number(process.env.AUTH_RATE_LIMIT ?? 20),
   standardHeaders: true,
   legacyHeaders: false,
 });

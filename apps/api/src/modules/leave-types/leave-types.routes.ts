@@ -16,6 +16,8 @@ const ABSENCE_VIEWER_ROLES = [
 
 leaveTypesRouter.use(requireAuth);
 leaveTypesRouter.get('/', requireEnterpriseAdmin, leaveTypesController.list);
+leaveTypesRouter.post('/', requireEnterpriseAdmin, leaveTypesController.create);
 leaveTypesRouter.get('/absence-cap', requireAnyRole(ABSENCE_VIEWER_ROLES), leaveTypesController.getAbsenceCap);
 leaveTypesRouter.put('/absence-cap', requireEnterpriseAdmin, leaveTypesController.updateAbsenceCap);
 leaveTypesRouter.put('/:id', requireEnterpriseAdmin, leaveTypesController.update);
+leaveTypesRouter.delete('/:id', requireEnterpriseAdmin, leaveTypesController.remove);
