@@ -16,8 +16,14 @@ DATABASE_URL="postgresql://smart:smart@localhost:5544/smart_enterprise_test?sche
 ```
 
 Then seed the personas through the real app flows (register tenant → sysadmin accepts →
-admin creates users + a project with the PM/TL as leads). All personas below share the
-password used at seeding time.
+admin creates users + a project with the PM/TL as leads) — with the test API up (step 2
+below), run the idempotent script:
+
+```bash
+node e2e/seed-personas.mjs   # from apps/web
+```
+
+All personas share `E2E_PERSONA_PASSWORD` (default `E2ePass@123`).
 
 ## Run
 
