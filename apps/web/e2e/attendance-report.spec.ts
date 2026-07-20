@@ -24,7 +24,7 @@ test.describe('Attendance report (Finance journey)', () => {
           .innerText(),
       );
 
-    await expect(page.getByText('Working days')).toBeVisible();
+    await expect(page.getByText('Working days', { exact: true })).toBeVisible();
     const calendar = await stat('Calendar days');
     const weekends = await stat('Weekend days');
     const holidays = await stat('Holidays');
@@ -111,6 +111,6 @@ test.describe('Attendance report (Finance journey)', () => {
 
     await page.unroute('**/reports/attendance*');
     await page.getByRole('button', { name: 'Retry' }).click();
-    await expect(page.getByText('Working days')).toBeVisible();
+    await expect(page.getByText('Working days', { exact: true })).toBeVisible();
   });
 });

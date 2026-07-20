@@ -6,7 +6,7 @@ export interface Credentials {
 }
 
 /** Reads E2E_<NAME>_EMAIL / E2E_<NAME>_PASSWORD; tests skip themselves when a persona is unset. */
-export function persona(name: 'finance' | 'hr' | 'employee' | 'admin'): Credentials | null {
+export function persona(name: 'finance' | 'hr' | 'employee' | 'admin' | 'pm' | 'tl'): Credentials | null {
   const key = name.toUpperCase();
   const email = process.env[`E2E_${key}_EMAIL`];
   const password = process.env[`E2E_${key}_PASSWORD`];
@@ -35,7 +35,12 @@ export function uniqueWeekdayDate(offset = 0): string {
 export async function deleteHolidayIfPresent(page: Page, name: string): Promise<void> {
   await page.goto('/organization/holidays');
   const deleteButton = page.getByRole('button', { name: `Delete ${name}` });
-  if ((await deleteButton.count()) === 0) return;
+  // The list loads async after navigation — wait for the row before concluding it's absent.
+  try {
+    await deleteButton.first().waitFor({ state: 'visible', timeout: 3000 });
+  } catch {
+    return;
+  }
   await deleteButton.first().click();
   await page.getByRole('button', { name: 'Delete holiday' }).click();
   await expect(page.getByText('Holiday deleted')).toBeVisible();

@@ -12,6 +12,8 @@ import { defineConfig, devices } from '@playwright/test';
  *   E2E_HR_EMAIL / E2E_HR_PASSWORD              hr-head role
  *   E2E_EMPLOYEE_EMAIL / E2E_EMPLOYEE_PASSWORD  no special roles
  *   E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD        enterprise-admin role
+ *   E2E_PM_EMAIL / E2E_PM_PASSWORD              project-manager role (leave approver)
+ *   E2E_TL_EMAIL / E2E_TL_PASSWORD              tech-lead role (leave approver)
  * Holiday tests create and delete their own rows; they leave the tenant unchanged.
  */
 export default defineConfig({

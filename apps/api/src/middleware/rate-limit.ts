@@ -3,7 +3,8 @@ import rateLimit from 'express-rate-limit';
 /** Coarse defense-in-depth limiter applied to every route. */
 export const globalRateLimiter = rateLimit({
   windowMs: 60_000,
-  limit: 300,
+  // Env-tunable so e2e runs (parallel workers from one IP) can raise it; production default stays 300.
+  limit: Number(process.env.GLOBAL_RATE_LIMIT ?? 300),
   standardHeaders: true,
   legacyHeaders: false,
 });

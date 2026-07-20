@@ -11,6 +11,8 @@ import {
 const finance = persona('finance');
 const hr = persona('hr');
 const employee = persona('employee');
+const pm = persona('pm');
+const tl = persona('tl');
 
 /**
  * The payroll-math journey (closes change task 5.2): an employee's approved
@@ -23,7 +25,7 @@ const employee = persona('employee');
  * (per-day de-duplication would otherwise absorb the delta).
  */
 test.describe('Payroll math end to end', () => {
-  test.skip(!finance || !hr || !employee, 'finance/hr/employee personas not set');
+  test.skip(!finance || !hr || !employee || !pm || !tl, 'finance/hr/employee/pm/tl personas not set');
 
   test('an approved 2-day LWP leave moves payable days by exactly −2', async ({
     page,
@@ -39,8 +41,8 @@ test.describe('Payroll math end to end', () => {
     );
     test.skip(!before, 'employee not present in the attendance report');
 
-    const leave = await createApprovedLwpLeave(request, employee!, hr!);
-    test.skip(!leave, 'tenant lacks a department/project/project-manager for the leave form');
+    const leave = await createApprovedLwpLeave(request, employee!, pm!, tl!);
+    test.skip(!leave, 'tenant lacks a department/project/PM/TL for the leave form');
 
     try {
       await loginAs(page, finance!);
