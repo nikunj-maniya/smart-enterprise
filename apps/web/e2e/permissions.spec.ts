@@ -54,14 +54,14 @@ test.describe('Permissions and regression', () => {
 
     await page.getByRole('link', { name: 'Reports', exact: true }).click();
     await expect(page).toHaveURL(/\/reports$/);
-    await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Export absences CSV' })).toBeVisible();
 
     await page.goto('/organization/departments');
-    await expect(page.getByRole('button', { name: /Add department/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /New department/i })).toBeVisible();
 
     // Both new screens open for the admin, who holds every permission.
     await page.goto('/reports/attendance');
-    await expect(page.getByText('Working days')).toBeVisible();
+    await expect(page.getByText('Working days', { exact: true })).toBeVisible();
     await page.goto('/organization/holidays');
     await expect(page.getByRole('button', { name: 'Add holiday' })).toBeVisible();
   });

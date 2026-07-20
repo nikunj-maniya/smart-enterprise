@@ -51,23 +51,28 @@ export interface ApprovedLeave {
 }
 
 /**
- * Employee submits a 2-weekday LWP leave through the real request API; HR Head
- * moves it to Approved via the status-model transition the UI exposes. Returns
- * null (test should skip) when the tenant lacks the fixtures the leave form
- * requires (a department, a project, a project manager).
+ * Employee submits a 2-weekday LWP leave through the real request API; the PM and
+ * Tech Lead named on the request approve it through the decision endpoint — the
+ * same flow the app itself enforces (parallel approval, snapshotted approvers).
+ * Returns null (test should skip) when the tenant lacks the fixtures the leave
+ * form requires (a department, a project, the PM/TL personas in the directory).
  */
 export async function createApprovedLwpLeave(
   request: APIRequestContext,
   employee: Credentials,
-  hr: Credentials,
+  pm: Credentials,
+  tl: Credentials,
 ): Promise<ApprovedLeave | null> {
   const span = nextTwoWeekdaySpan();
   if (!span) return null;
 
   const employeeToken = await apiLogin(request, employee);
+  // Department reads are role-gated (admin/HR/PM/TL) — the employee's own form gets its
+  // options from the compiled form metadata, so the fixture looks the ids up as the PM instead.
+  const pmLookupToken = await apiLogin(request, pm);
   const departments = await getJson<{ rows: { id: string; name: string }[] }>(
     request,
-    employeeToken,
+    pmLookupToken,
     '/departments?pageSize=100',
   );
   const projects = await getJson<{ rows: { id: string; name: string }[] }>(
@@ -75,17 +80,20 @@ export async function createApprovedLwpLeave(
     employeeToken,
     '/directory/projects',
   );
-  const pms = await getJson<{ rows: { id: string; name: string }[] }>(
+  const pms = await getJson<{ rows: { id: string; name: string; email: string }[] }>(
     request,
     employeeToken,
-    '/directory/users?roles=project-manager&limit=5',
+    '/directory/users?roles=project-manager&limit=50',
   );
-  const tls = await getJson<{ rows: { id: string; name: string }[] }>(
+  const tls = await getJson<{ rows: { id: string; name: string; email: string }[] }>(
     request,
     employeeToken,
-    '/directory/users?roles=tech-lead&limit=5',
+    '/directory/users?roles=tech-lead&limit=50',
   );
-  if (!departments.rows.length || !projects.rows.length || !pms.rows.length) return null;
+  // The approvers must be the credentialed personas — they decide the request below.
+  const pmRow = pms.rows.find((u) => u.email === pm.email);
+  const tlRow = tls.rows.find((u) => u.email === tl.email);
+  if (!departments.rows.length || !projects.rows.length || !pmRow || !tlRow) return null;
 
   const created = await request.post(`${API_URL}/requests`, {
     headers: { Authorization: `Bearer ${employeeToken}` },
@@ -95,8 +103,8 @@ export async function createApprovedLwpLeave(
         full_name: employee.email,
         department: departments.rows[0].id,
         project_name: [projects.rows[0].id],
-        project_manager: [pms.rows[0].id],
-        tech_lead: [tls.rows.length ? tls.rows[0].id : pms.rows[0].id],
+        project_manager: [pmRow.id],
+        tech_lead: [tlRow.id],
         away_duration: '≤2 days',
         number_of_days: 2,
         when_go: 'Later',
@@ -111,13 +119,18 @@ export async function createApprovedLwpLeave(
     throw new Error(`request creation failed: ${created.status()} ${await created.text()}`);
   const dto = (await created.json()) as { id: string };
 
-  const hrToken = await apiLogin(request, hr);
-  const approved = await request.post(`${API_URL}/requests/${dto.id}/transitions`, {
-    headers: { Authorization: `Bearer ${hrToken}` },
-    data: { toState: 'Approved', note: 'E2E fixture approval' },
-  });
-  if (!approved.ok())
-    throw new Error(`approval transition failed: ${approved.status()} ${await approved.text()}`);
+  // Parallel approval: both snapshotted approvers (PM + TL) decide via the decision endpoint.
+  for (const approver of [pm, tl]) {
+    const token = await apiLogin(request, approver);
+    const decided = await request.post(`${API_URL}/requests/${dto.id}/decisions`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { decision: 'approved', comment: 'E2E fixture approval' },
+    });
+    if (!decided.ok())
+      throw new Error(
+        `approval decision by ${approver.email} failed: ${decided.status()} ${await decided.text()}`,
+      );
+  }
 
   return { requestId: dto.id, start: span.start, end: span.end };
 }
