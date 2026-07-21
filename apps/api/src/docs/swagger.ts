@@ -12,7 +12,7 @@ import { parse } from 'yaml';
  * contains no secrets; the documented endpoints themselves stay token-guarded.
  */
 export function mountApiDocs(app: Express): void {
-  const specPath = fileURLToPath(new URL('../../docs/attendance-api.openapi.yaml', import.meta.url));
+  const specPath = fileURLToPath(new URL('../../docs/api.openapi.yaml', import.meta.url));
   const spec = parse(readFileSync(specPath, 'utf8')) as Record<string, unknown>;
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(spec, { customSiteTitle: 'Smart Enterprise API Docs' }));
 }
