@@ -1,0 +1,3482 @@
+openapi: 3.0.3
+info:
+  title: Smart Enterprise API
+  description: >
+    Full endpoint surface for the Smart Enterprise API. Conventions that hold
+    everywhere unless an operation says otherwise: all endpoints except the ones
+    explicitly marked "public" require `Authorization: Bearer <accessToken>`
+    (obtained via POST /auth/login); tenant-scoped endpoints operate on the
+    caller's own tenant only (cross-tenant ids read as 404, not 403); list
+    endpoints paginate via `page`/`pageSize` query params and return
+    `{ rows, total, page, pageSize }`; every mutating endpoint writes an
+    AuditLog row inside the same transaction as the change; validation
+    failures return `400 { error: "Validation failed", details: <Zod
+    flatten()> }`, while named business-rule failures return
+    `<status> { error: <message>, details?: <unknown> }`; a platform System
+    Admin (no tenant) receives 403 on every tenant-scoped endpoint. A global
+    rate limiter (300 req/min/IP by default) applies to all routes; `/auth`
+    and `/public/self-registration` additionally sit behind a stricter auth
+    rate limiter (20 req/15min/IP by default).
+  version: 1.0.0
+servers:
+  - url: http://localhost:4000
+    description: Local development (API_PORT)
+tags:
+  - name: Auth
+    description: Login, session, and password management. Mostly public (unauthenticated).
+  - name: Registrations
+    description: Platform System Admin review queue for new-enterprise signups.
+  - name: Self-Registration
+    description: Enterprise Admin-generated invite links that let employees join their own tenant without a System Admin creating each account.
+  - name: Profile
+    description: The caller's own profile and notification preferences.
+  - name: Enterprise Profile
+    description: The caller's tenant's own company details (Enterprise Admin only).
+  - name: Enterprises
+    description: Platform System Admin management of tenant enterprises.
+  - name: Platform Users
+    description: Platform System Admin cross-tenant user directory.
+  - name: Org Users
+    description: Enterprise Admin CRUD over the tenant's own users.
+  - name: Departments
+    description: Tenant department master.
+  - name: Roles
+    description: Tenant custom/system role and permission management.
+  - name: Settings
+    description: Platform-wide settings (System Admin only).
+  - name: Audit Log
+    description: Platform-wide audit trail (System Admin only).
+  - name: Notifications
+    description: The caller's own in-app notification feed.
+  - name: Overview
+    description: System Admin dashboard summary.
+  - name: Directory
+    description: Lightweight tenant user/project pickers used by form fields — open to any authenticated tenant user.
+  - name: Search
+    description: Global search, fanned out per viewer tier.
+  - name: Projects
+    description: Tenant project master (PM/Tech Lead/members).
+  - name: Forms
+    description: Generic form-engine — definitions, admin drafts, and publishing.
+  - name: Requests
+    description: Form submissions and their approval/fulfilment lifecycle.
+  - name: Escalation Rules
+    description: Tenant approval-escalation routing matrix (Enterprise Admin only).
+  - name: Leave Types
+    description: Tenant leave-type master and the concurrent-absence cap setting.
+  - name: Leave Balances
+    description: The caller's own leave balances.
+  - name: Holidays
+    description: Company-holiday master. Viewing is open to any tenant user; writes require HR Head or Enterprise Admin (manage_holidays).
+  - name: Front Desk
+    description: Visitor check-in/check-out desk (Enterprise Admin or HR Head).
+  - name: Item Catalog
+    description: IT software/hardware catalog used by the IT request form (Enterprise Admin only).
+  - name: Absences
+    description: Cross-employee absence calendar and over-cap panel, scoped by viewer role.
+  - name: Attendance Report
+    description: Finance payable-days report. Requires the finance or enterprise-admin role (view_attendance_report). Never exposes leave reasons.
+  - name: Slack
+    description: Slack workspace connection/settings (Enterprise Admin) and Slack's own inbound interactivity webhook.
+
+paths:
+  # ───────────────────────────── Auth ─────────────────────────────
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email + password
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401':
+          description: No user with this email, or wrong password.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Invalid email or password }
+        '403':
+          description: Account pending approval, inactive/suspended, or tenant suspended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                pending: { value: { error: Your account is awaiting approval by your administrator. } }
+                inactive: { value: { error: Account is not active } }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the caller's own auth profile
+      operationId: getMe
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: User resolved from token no longer exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: User not found }
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change the caller's own password
+      operationId: changePassword
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, minLength: 1 }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Password changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthUser' }
+        '400':
+          description: Validation failure, or current password is wrong.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                wrongPassword: { value: { error: Current password is incorrect } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password-reset link
+      description: >
+        Always returns { ok: true }, even for an unknown/inactive email
+        (anti-enumeration). No email provider is wired up in v1 — the reset
+        link is console-logged server-side.
+      operationId: forgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties: { email: { type: string, format: email } }
+      responses:
+        '200':
+          description: Always OK.
+          content:
+            application/json:
+              schema: { type: object, required: [ok], properties: { ok: { type: boolean, enum: [true] } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset a password using a reset token
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token: { type: string, minLength: 1 }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Password reset.
+          content:
+            application/json:
+              schema: { type: object, required: [ok], properties: { ok: { type: boolean, enum: [true] } } }
+        '400':
+          description: Validation failure, or invalid/used/expired token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: This reset link is invalid or has expired. }
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token for a new access + refresh token pair
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        '200':
+          description: New token pair.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, refreshToken]
+                properties: { accessToken: { type: string }, refreshToken: { type: string } }
+        '400':
+          description: refreshToken missing from body.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: refreshToken is required }
+        '401':
+          description: Invalid/expired refresh token, or user inactive/tenant suspended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out (no-op)
+      description: Stateless JWTs — this is a no-op kept for symmetry/future token revocation.
+      operationId: logout
+      responses:
+        '200':
+          description: Always OK.
+          content:
+            application/json:
+              schema: { type: object, required: [ok], properties: { ok: { type: boolean, enum: [true] } } }
+
+  # ───────────────────────────── Registrations ─────────────────────────────
+  /registrations:
+    post:
+      tags: [Registrations]
+      summary: Self-register a new enterprise (public signup)
+      operationId: registerEnterprise
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterEnterpriseRequest' }
+      responses:
+        '201':
+          description: Registration created (Pending).
+          content:
+            application/json:
+              schema: { type: object, required: [id], properties: { id: { type: string } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403':
+          description: Public registration disabled by platform setting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Public enterprise registration is currently disabled. }
+        '409':
+          description: Email already registered (active) or previously rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                rejected: { value: { error: This email was previously rejected and cannot be used again. } }
+                exists: { value: { error: This email is already registered. } }
+    get:
+      tags: [Registrations]
+      summary: List enterprise registrations (paginated)
+      operationId: listRegistrations
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string }, description: Matches companyName/contactName/contactEmail. }
+        - { name: status, in: query, schema: { type: string, enum: [Pending, Accepted, Rejected] } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistrationsResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+  /registrations/{id}/accept:
+    post:
+      tags: [Registrations]
+      summary: Accept a pending registration
+      description: Activates the tenant + user, seeds org defaults (escalation rules, leave types, item catalog, core forms), grants Enterprise Admin, initializes leave balances.
+      operationId: acceptRegistration
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnterpriseRegistrationDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+        '404':
+          description: Registration not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Registration not found }
+        '409':
+          description: Already reviewed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Registration has already been reviewed }
+  /registrations/{id}/reject:
+    post:
+      tags: [Registrations]
+      summary: Reject a pending registration
+      operationId: rejectRegistration
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties: { reason: { type: string, minLength: 1 } }
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnterpriseRegistrationDto' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+        '404':
+          description: Registration not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Registration not found }
+        '409':
+          description: Already reviewed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Registration has already been reviewed }
+
+  # ───────────────────────────── Self-Registration ─────────────────────────────
+  /self-registration:
+    get:
+      tags: [Self-Registration]
+      summary: Get the tenant's current invite link, if any
+      operationId: getSelfRegistrationLink
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK (null if no link has been generated yet).
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf: [{ $ref: '#/components/schemas/RegistrationLink' }]
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+    post:
+      tags: [Self-Registration]
+      summary: Generate (or regenerate) the tenant's invite link
+      description: At most one active link per tenant — regenerating implicitly revokes the old one.
+      operationId: generateSelfRegistrationLink
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expiryMinutes: { type: integer, minimum: 5, maximum: 10080, default: 30 }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegistrationLink' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+    delete:
+      tags: [Self-Registration]
+      summary: Revoke the tenant's invite link
+      description: Idempotent — no error if no link exists.
+      operationId: revokeSelfRegistrationLink
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Revoked (or already absent). }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /public/self-registration/{token}:
+    get:
+      tags: [Self-Registration]
+      summary: Resolve an invite token to its tenant name (public)
+      operationId: getPublicSelfRegistrationInfo
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tenantName]
+                properties: { tenantName: { type: string } }
+        '410':
+          description: Token invalid/expired, or tenant no longer active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                expired: { value: { error: This registration link is invalid or has expired. } }
+                unavailable: { value: { error: This registration link is no longer available. } }
+    post:
+      tags: [Self-Registration]
+      summary: Self-register as an employee of the invite's tenant (public)
+      description: Created user is Pending (awaits Enterprise Admin approval) and gets the tenant's Employee role.
+      operationId: submitPublicSelfRegistration
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, minLength: 1 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema: { type: object, required: [ok], properties: { ok: { type: boolean, enum: [true] } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409':
+          description: Email already registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: This email is already registered. }
+        '410':
+          description: Token invalid/expired, or tenant no longer active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ───────────────────────────── Profile ─────────────────────────────
+  /profile:
+    get:
+      tags: [Profile]
+      summary: Get the caller's own profile
+      operationId: getProfile
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProfileDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Profile]
+      summary: Update the caller's own profile
+      description: Roles/departments are read-only here (admin-managed elsewhere); password changes go through POST /auth/change-password.
+      operationId: updateProfile
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1 }
+                phone: { type: string, nullable: true }
+                jobTitle: { type: string, nullable: true }
+                location: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProfileDto' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /profile/notification-preferences:
+    get:
+      tags: [Profile]
+      summary: Get the caller's notification preferences
+      operationId: getNotificationPreferences
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferencesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Profile]
+      summary: Toggle one notification type/channel pair
+      operationId: updateNotificationPreference
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, channel, enabled]
+              properties:
+                type: { type: string }
+                channel: { type: string, enum: [inApp, slack] }
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated (full list returned).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferencesResponse' }
+        '400':
+          description: Validation failure, unknown type, or type is mandatory (cannot be muted).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────── Enterprise Profile ─────────────────────────────
+  /enterprise-profile:
+    get:
+      tags: [Enterprise Profile]
+      summary: Get the caller's tenant's company details
+      operationId: getEnterpriseProfile
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnterpriseDetailsDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Enterprise not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      tags: [Enterprise Profile]
+      summary: Update the caller's tenant's company details
+      operationId: updateEnterpriseProfile
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1 }
+                industry: { type: string, nullable: true }
+                size: { type: string, nullable: true }
+                website: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnterpriseDetailsDto' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Enterprise not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ───────────────────────────── Enterprises ─────────────────────────────
+  /enterprises:
+    get:
+      tags: [Enterprises]
+      summary: List tenant enterprises (Active/Suspended only, paginated)
+      operationId: listEnterprises
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 20 } }
+        - { name: search, in: query, schema: { type: string }, description: Matches tenant name or industry. }
+        - { name: status, in: query, schema: { type: string, enum: [Active, Suspended] } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnterprisesResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+  /enterprises/{id}/suspend:
+    post:
+      tags: [Enterprises]
+      summary: Suspend an active enterprise
+      operationId: suspendEnterprise
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Suspended. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+        '404':
+          description: Enterprise not found.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: Not currently Active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Only an active enterprise can be suspended }
+  /enterprises/{id}/reactivate:
+    post:
+      tags: [Enterprises]
+      summary: Reactivate a suspended enterprise
+      operationId: reactivateEnterprise
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Reactivated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+        '404':
+          description: Enterprise not found.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: Not currently Suspended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Only a suspended enterprise can be reactivated }
+
+  # ───────────────────────────── Platform Users ─────────────────────────────
+  /users:
+    get:
+      tags: [Platform Users]
+      summary: List platform users across all tenants (paginated)
+      operationId: listPlatformUsers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string }, description: Matches name or email. }
+        - { name: status, in: query, schema: { type: string, enum: [Pending, Active, Inactive, Suspended] } }
+        - { name: tenantId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformUsersResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+  /users/{id}/reset-password:
+    post:
+      tags: [Platform Users]
+      summary: Force-reset a tenant user's password
+      description: Returns a one-time plaintext temporary password (no email provider wired up); target must change it on next login.
+      operationId: adminResetPlatformUserPassword
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: Reset.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [temporaryPassword]
+                properties: { temporaryPassword: { type: string } }
+        '400':
+          description: Target is a System Admin account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Cannot reset a System Admin account this way }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+        '404':
+          description: User not found.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  # ───────────────────────────── Org Users ─────────────────────────────
+  /org-users:
+    get:
+      tags: [Org Users]
+      summary: List the tenant's own users (paginated)
+      operationId: listOrgUsers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [Pending, Active, Inactive, Suspended] } }
+        - { name: departmentId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgUsersResponse' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+    post:
+      tags: [Org Users]
+      summary: Create a tenant user
+      operationId: createOrgUser
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrgUserRequest' }
+      responses:
+        '201':
+          description: Created.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OrgUserDto' } } }
+        '400':
+          description: Validation failure, or a role/department id doesn't belong to this tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '409':
+          description: Email already registered (global uniqueness).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: This email is already registered. }
+  /org-users/options:
+    get:
+      tags: [Org Users]
+      summary: Lightweight active-user picker list
+      operationId: listOrgUserOptions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: role, in: query, schema: { type: string }, description: Filter to holders of this role key. }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrgUserPickerDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /org-users/stats:
+    get:
+      tags: [Org Users]
+      summary: Tenant user/department counts
+      operationId: getOrgUserStats
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgUserStats' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /org-users/{id}:
+    put:
+      tags: [Org Users]
+      summary: Update a tenant user's name/roles/departments
+      description: Email and password are not editable here.
+      operationId: updateOrgUser
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateOrgUserRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content: { application/json: { schema: { $ref: '#/components/schemas/OrgUserDto' } } }
+        '400':
+          description: Validation failure, or a role/department id doesn't belong to this tenant.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: User not found.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    delete:
+      tags: [Org Users]
+      summary: Permanently delete a tenant user
+      description: Hard delete, blocked by referential integrity (department headship, project membership, submitted requests).
+      operationId: deleteOrgUser
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted. }
+        '400':
+          description: Attempting to delete the caller's own account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: You cannot remove your own account }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: User not found.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: Still referenced by a department headship, project membership, or a submitted request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                deptHead: { value: { error: 'This user heads 1 department(s). Reassign the head before removing them.' } }
+                projectMember: { value: { error: 'This user is assigned to 2 project(s). Remove them from those projects first.' } }
+                hasRequests: { value: { error: This user has submitted requests. Deactivate them instead so their history stays intact. } }
+  /org-users/{id}/deactivate:
+    post:
+      tags: [Org Users]
+      summary: Deactivate a tenant user
+      operationId: deactivateOrgUser
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Deactivated., content: { application/json: { schema: { $ref: '#/components/schemas/OrgUserDto' } } } }
+        '400':
+          description: Attempting to deactivate the caller's own account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: You cannot deactivate your own account }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: User not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Already inactive.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: User is already deactivated }
+  /org-users/{id}/reactivate:
+    post:
+      tags: [Org Users]
+      summary: Reactivate a tenant user
+      operationId: reactivateOrgUser
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Reactivated., content: { application/json: { schema: { $ref: '#/components/schemas/OrgUserDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: User not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Already active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: User is already active }
+  /org-users/{id}/approve:
+    post:
+      tags: [Org Users]
+      summary: Approve a pending self-registration
+      operationId: approveOrgUser
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Approved., content: { application/json: { schema: { $ref: '#/components/schemas/OrgUserDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: User not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Not currently Pending.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Only a pending self-registration can be approved }
+  /org-users/{id}/reject:
+    post:
+      tags: [Org Users]
+      summary: Reject a pending self-registration
+      description: Deletes the pending user entirely, freeing the email for reuse.
+      operationId: rejectOrgUser
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Rejected and deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: User not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Not currently Pending.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Only a pending self-registration can be rejected }
+  /org-users/{id}/reset-password:
+    post:
+      tags: [Org Users]
+      summary: Force-reset a tenant user's password
+      operationId: adminResetOrgUserPassword
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: Reset.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [temporaryPassword]
+                properties: { temporaryPassword: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: User not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ───────────────────────────── Departments ─────────────────────────────
+  /departments:
+    get:
+      tags: [Departments]
+      summary: List tenant departments (paginated)
+      operationId: listDepartments
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: archived, in: query, schema: { type: boolean }, description: Omit to include both; pickers pass false. }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentsResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenAbsenceViewer' }
+    post:
+      tags: [Departments]
+      summary: Create a department
+      operationId: createDepartment
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateDepartmentRequest' } } }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentDto' } } } }
+        '400':
+          description: Validation failure, or a head id isn't a tenant member.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /departments/{id}:
+    put:
+      tags: [Departments]
+      summary: Update a department's name/heads
+      operationId: updateDepartment
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateDepartmentRequest' } } }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentDto' } } } }
+        '400': { description: Validation failure, or a head id isn't a tenant member., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Department not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [Departments]
+      summary: Delete a department
+      operationId: deleteDepartment
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Department not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Still has members, or still referenced by requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                hasMembers: { value: { error: '2 user(s) are assigned to this department. Reassign them before deleting it.' } }
+                referenced: { value: { error: Requests reference this department, so it can't be deleted. } }
+  /departments/{id}/archive:
+    post:
+      tags: [Departments]
+      summary: Archive a department
+      operationId: archiveDepartment
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Archived., content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Department not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /departments/{id}/unarchive:
+    post:
+      tags: [Departments]
+      summary: Unarchive a department
+      operationId: unarchiveDepartment
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Unarchived., content: { application/json: { schema: { $ref: '#/components/schemas/DepartmentDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Department not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ───────────────────────────── Roles ─────────────────────────────
+  /roles:
+    get:
+      tags: [Roles]
+      summary: List tenant roles (paginated)
+      operationId: listRoles
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [system, custom] } }
+        - { name: archived, in: query, schema: { type: boolean } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/RolesResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+    post:
+      tags: [Roles]
+      summary: Create a custom role
+      operationId: createRole
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateRoleRequest' } } }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/RoleDto' } } } }
+        '400':
+          description: Validation failure, incl. an unknown permission key.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '409':
+          description: A role with this name already exists (case-insensitive).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A role with this name already exists }
+  /roles/{id}:
+    put:
+      tags: [Roles]
+      summary: Update a role's name/permissions
+      description: For system roles, incoming permissions are ignored (fixed bundle) — only name changes.
+      operationId: updateRole
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateRoleRequest' } } }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/RoleDto' } } } }
+        '400': { description: Validation failure., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Role not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: A role with this name already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A role with this name already exists }
+    delete:
+      tags: [Roles]
+      summary: Delete a custom role
+      operationId: deleteRole
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Role not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: System role, or still has members.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                system: { value: { error: System roles cannot be deleted } }
+                hasMembers: { value: { error: 'This role is assigned to 3 member(s). Reassign them before deleting it.' } }
+  /roles/{id}/archive:
+    post:
+      tags: [Roles]
+      summary: Archive a custom role
+      operationId: archiveRole
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Archived., content: { application/json: { schema: { $ref: '#/components/schemas/RoleDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Role not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: System roles cannot be archived.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: System roles cannot be archived }
+  /roles/{id}/unarchive:
+    post:
+      tags: [Roles]
+      summary: Unarchive a custom role
+      operationId: unarchiveRole
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Unarchived., content: { application/json: { schema: { $ref: '#/components/schemas/RoleDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Role not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: System roles cannot be archived., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ───────────────────────────── Settings ─────────────────────────────
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Get platform-wide settings
+      operationId: getSettings
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/PlatformSettings' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+    put:
+      tags: [Settings]
+      summary: Update platform-wide settings (partial)
+      operationId: updateSettings
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                forcePasswordChangeOnFirstLogin: { type: boolean }
+                allowPublicRegistration: { type: boolean }
+                notifyOnNewRegistration: { type: boolean }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/PlatformSettings' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+
+  # ───────────────────────────── Audit Log ─────────────────────────────
+  /audit-log:
+    get:
+      tags: [Audit Log]
+      summary: List platform audit-log entries (paginated)
+      operationId: listAuditLog
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string }, description: Matches entity, entityId, or tenant name. }
+        - { name: action, in: query, schema: { type: string, enum: [accept, reject, suspend, reactivate] } }
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: tenantId, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/AuditLogResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+
+  # ───────────────────────────── Notifications ─────────────────────────────
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List the caller's own notifications (paginated)
+      operationId: listNotifications
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: tab, in: query, schema: { type: string, enum: [all, unread], default: all } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/NotificationsResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /notifications/{id}/read:
+    post:
+      tags: [Notifications]
+      summary: Mark one notification as read
+      description: Scoped to the caller — a mismatched id/owner silently no-ops (still 204).
+      operationId: markNotificationRead
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Marked read (or already was / not found — no-op either way). }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all of the caller's notifications as read
+      operationId: markAllNotificationsRead
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Marked read. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────── Overview ─────────────────────────────
+  /overview:
+    get:
+      tags: [Overview]
+      summary: System Admin dashboard summary
+      operationId: getOverview
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/OverviewResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenSystemAdmin' }
+
+  # ───────────────────────────── Directory ─────────────────────────────
+  /directory/users:
+    get:
+      tags: [Directory]
+      summary: Tenant user picker (for user-picker form fields)
+      operationId: listDirectoryUsers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: roles, in: query, schema: { type: array, items: { type: string } } }
+        - { name: departments, in: query, schema: { type: array, items: { type: string } } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, email]
+                      properties: { id: { type: string }, name: { type: string }, email: { type: string } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /directory/projects:
+    get:
+      tags: [Directory]
+      summary: Tenant active-project picker (for project-picker form fields)
+      operationId: listDirectoryProjects
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties: { id: { type: string }, name: { type: string } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────── Search ─────────────────────────────
+  /search:
+    get:
+      tags: [Search]
+      summary: Global search, fanned out per viewer tier
+      description: >
+        System Admin sees enterprises/registrations/platform-users groups. Tenant
+        users see requests(own)/users/projects/departments groups — the
+        departments group only appears for Enterprise Admins. Each group is
+        capped at 5 items and omitted entirely if empty.
+      operationId: globalSearch
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1 } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/GlobalSearchResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────── Projects ─────────────────────────────
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List tenant projects (paginated)
+      operationId: listProjects
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, archived] } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/ProjectsResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenAbsenceViewer' }
+    post:
+      tags: [Projects]
+      summary: Create a project
+      operationId: createProject
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateProjectRequest' } } }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/ProjectDto' } } } }
+        '400':
+          description: Validation failure, PM/Tech Lead are the same user, or a member id isn't a tenant user.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /projects/{id}:
+    put:
+      tags: [Projects]
+      summary: Update a project
+      operationId: updateProject
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateProjectRequest' } } }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/ProjectDto' } } } }
+        '400': { description: Same validation as create., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Project not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      operationId: deleteProject
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Project not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Still has assigned people, or still referenced by requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                hasPeople: { value: { error: This project has assigned people (PM, Tech Lead, or members). Clear them before deleting it. } }
+                referenced: { value: { error: Requests reference this project, so it can't be deleted. } }
+
+  # ───────────────────────────── Forms ─────────────────────────────
+  /forms:
+    get:
+      tags: [Forms]
+      summary: List latest published form definitions
+      operationId: listForms
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FormDefinitionSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /forms/drafts:
+    get:
+      tags: [Forms]
+      summary: List latest version (draft or published) per form key — admin builder list
+      operationId: listFormDrafts
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FormBuilderListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+    post:
+      tags: [Forms]
+      summary: Create a new custom form draft
+      operationId: createFormDraft
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties: { title: { type: string, minLength: 1 } }
+      responses:
+        '201': { description: Created (version 1, empty field set)., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '400':
+          description: Title slugifies to empty (no letters/numbers).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Title must contain at least one letter or number }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '409':
+          description: A form with this key already exists in the tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A form with this name already exists }
+  /forms/drafts/{key}:
+    get:
+      tags: [Forms]
+      summary: Get the tenant's current draft for a form key
+      operationId: getFormDraft
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Draft not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Draft not found }
+    put:
+      tags: [Forms]
+      summary: Replace a draft's field set
+      description: Core forms (renderer=core) block structural edits — cannot add/remove fields or change a field's type, only relabel/reorder/required/validation/visibility.
+      operationId: saveDraftFields
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields: { type: array, items: { $ref: '#/components/schemas/FormField' } }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '400':
+          description: Validation failure, a blocked core-form structural edit, or a field deletion breaks existing approval routing.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Draft not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /forms/drafts/{key}/routing:
+    put:
+      tags: [Forms]
+      summary: Set a draft's approval routing (approver rules)
+      operationId: saveDraftRouting
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stageRules]
+              properties:
+                mode: { type: string, enum: [parallel], default: parallel }
+                stageRules:
+                  type: object
+                  required: [approvers]
+                  properties:
+                    approvers:
+                      type: array
+                      items:
+                        type: object
+                        required: [source, field]
+                        properties:
+                          source: { type: string, enum: [field] }
+                          field: { type: string, description: Must reference an existing user-picker/project-picker field. }
+                          when: { $ref: '#/components/schemas/VisibilityRule' }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '400':
+          description: References an unknown field, or a non-picker field.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Draft not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /forms/drafts/{key}/status-model:
+    put:
+      tags: [Forms]
+      summary: Set a draft's status model (states + role-gated transitions)
+      description: No guardrails enforced here (WIP saves allowed) — full validation runs at publish time.
+      operationId: saveDraftStatusModel
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StatusModel' }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Draft not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /forms/drafts/{key}/publish:
+    post:
+      tags: [Forms]
+      summary: Publish a draft
+      description: Re-validates fields (≥1 required), status model (≥1 terminal state, no orphan/unreachable states, no self-approval), and routing before flipping status to published in place.
+      operationId: publishFormDraft
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Published., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '400':
+          description: Validation failure — no fields, unsupported field type, or invalid status model/routing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Add at least one field before publishing this form }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404': { description: Draft not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /forms/drafts/{key}/start:
+    post:
+      tags: [Forms]
+      summary: Start (or resume) editing a new draft version
+      description: Idempotent — returns the existing draft if one is already in progress; otherwise clones the latest published version.
+      operationId: startFormDraft
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      responses:
+        '201': { description: Draft started (or resumed)., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: No published version exists for this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Form not found }
+  /forms/{key}:
+    get:
+      tags: [Forms]
+      summary: Get the tenant's latest published form definition
+      description: Catalog-marker options (item-catalog/departments/leave-types) are resolved live against currently-active master data.
+      operationId: getFormByKey
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No published version for this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Form not found }
+    post:
+      tags: [Forms]
+      summary: Direct-publish a form definition (legacy path; used internally for core-form seeding)
+      operationId: publishForm
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: key, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, sections]
+              properties:
+                title: { type: string, minLength: 1 }
+                sections:
+                  type: array
+                  items: { type: object, description: FormSection — see FormDefinition.sections. }
+                approvalWorkflow:
+                  type: object
+                  properties: { mode: { type: string, default: parallel }, stageRules: {} }
+                statusModel: { $ref: '#/components/schemas/StatusModel' }
+      responses:
+        '201': { description: Published as a new version., content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '400':
+          description: Unsupported field type, or other structural validation failure.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+
+  # ───────────────────────────── Requests ─────────────────────────────
+  /requests:
+    get:
+      tags: [Requests]
+      summary: List the caller's own submitted requests ("My Requests", paginated)
+      operationId: listMyRequests
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/MyRequestsResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Requests]
+      summary: Submit a new request against a published form
+      description: >
+        Payload is validated against the form's field definitions
+        (type/required/options/visibility). Leave/WFH spans >2 days require an
+        HR-Head-sourced approver stage; IT items must be active catalog
+        entries; server derives startDate/endDate/totalDays and resolves
+        approvers server-side (never client-trusted).
+      operationId: createRequest
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [formKey, payload]
+              properties:
+                formKey: { type: string, minLength: 1 }
+                payload: { type: object, additionalProperties: true, description: 'Field key -> submitted value, shape depends on the form''s field definitions.' }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/RequestDto' } } } }
+        '400':
+          description: Field-level payload validation failure, or a form-specific business rule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                fieldValidation: { value: { error: Validation failed, details: { field_key: ['This field is required'] } } }
+                itCatalog: { value: { error: 'One or more selected items are no longer available', details: { software_items: ['Photoshop'] } } }
+                longLeave: { value: { error: This request spans more than 2 days and requires an HR Head sign-off. } }
+                halfDayRange: { value: { error: Half-day dates must fall within the selected start and end date. } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No published form for this key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Form not found }
+  /requests/approvals:
+    get:
+      tags: [Requests]
+      summary: The caller's own approval queue
+      operationId: listApprovalQueue
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: tab, in: query, schema: { type: string, enum: [pending, decided], default: pending } }
+        - { name: roleContext, in: query, schema: { type: string }, description: Filter to one of the caller's own approver-role snapshots. }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/ApprovalQueueResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /requests/fulfilment-queue:
+    get:
+      tags: [Requests]
+      summary: IT request fulfilment queue
+      operationId: getFulfilmentQueue
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: tab, in: query, schema: { type: string, enum: [open, fulfilled], default: open } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/FulfilmentQueueResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenItAdmin' }
+  /requests/{id}:
+    get:
+      tags: [Requests]
+      summary: Get a request's full detail
+      description: Reachable only by the request's own requester or one of its snapshotted approvers; otherwise 404 (no distinct 403, per PRD §11A.1 visibility policy). Renders against the request's own pinned form-definition version.
+      operationId: getRequestById
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/RequestDetail' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Not found, wrong tenant, or caller isn't the requester/an approver.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Request not found }
+  /requests/{id}/transitions:
+    post:
+      tags: [Requests]
+      summary: Fire a status-model transition (any transition other than Approve/Reject)
+      description: Authorization is per-transition, resolved from the form's status-model roles (or the reserved requester/system tokens) — not a fixed role list.
+      operationId: transitionRequest
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toState]
+              properties: { toState: { type: string, minLength: 1 }, note: { type: string } }
+      responses:
+        '200': { description: Transitioned., content: { application/json: { schema: { $ref: '#/components/schemas/RequestDto' } } } }
+        '400':
+          description: No status model, no declared transition, or must use the decision endpoint for Approve/Reject.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                noTransition: { value: { error: 'No transition declared from "Approved" to "Rejected"' } }
+                useDecisions: { value: { error: Use the decision endpoint to approve or reject this request } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Not authorized for this transition (wrong role, or not the requester/assigned IT Admin).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: You are not authorized to perform this transition }
+        '404': { description: Request not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Blocked by business rule, or lost the optimistic concurrency race.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                approverDecided: { value: { error: An approver has already acted on this request — it can no longer be withdrawn. } }
+                unassigned: { value: { error: Assign this request to yourself before updating it. } }
+                concurrent: { value: { error: Request status changed concurrently — retry } }
+  /requests/{id}/decisions:
+    post:
+      tags: [Requests]
+      summary: Record the caller's own approve/reject decision
+      description: Caller must be a snapshotted pending approver on this request — independent of any role middleware.
+      operationId: decideOnRequest
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+                comment: { type: string, description: Required (non-empty) when decision is rejected. }
+      responses:
+        '200': { description: Decided., content: { application/json: { schema: { $ref: '#/components/schemas/RequestDto' } } } }
+        '400':
+          description: Rejecting without a comment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A reason is required to reject }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Not an approver on this request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: You are not an approver on this request }
+        '404': { description: Request not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Already decided, or no longer awaiting a decision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                alreadyDecided: { value: { error: You have already decided this request } }
+                stale: { value: { error: This request is no longer awaiting your decision. } }
+  /requests/{id}/claim:
+    post:
+      tags: [Requests]
+      summary: Claim an approved IT request for fulfilment
+      description: First-claim-wins; scoped to IT-form requests only.
+      operationId: claimRequest
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Claimed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenItAdmin' }
+        '404':
+          description: Not found, wrong tenant, or not an IT-form request.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: Not currently claimable, or lost the race to another admin.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                notClaimable: { value: { error: Only an approved (or already in-progress) request can be claimed } }
+                raceLost: { value: { error: This request was just claimed by someone else — refresh and retry } }
+
+  # ───────────────────────────── Escalation Rules ─────────────────────────────
+  /escalation-rules:
+    get:
+      tags: [Escalation Rules]
+      summary: List the tenant's escalation-routing matrix
+      operationId: listEscalationRules
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/EscalationRuleDto' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /escalation-rules/{id}:
+    put:
+      tags: [Escalation Rules]
+      summary: Retarget an escalation rule
+      description: No create/delete — rules are a fixed, tenant-seeded matrix.
+      operationId: updateEscalationRule
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toRoleId, actionWindowHours]
+              properties:
+                toRoleId: { type: string, minLength: 1 }
+                actionWindowHours: { type: integer, minimum: 1, maximum: 720 }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/EscalationRuleDto' } } } }
+        '400':
+          description: Target role doesn't belong to this tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Target role not found }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Escalation rule not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Escalation rule not found }
+
+  # ───────────────────────────── Leave Types ─────────────────────────────
+  /leave-types:
+    get:
+      tags: [Leave Types]
+      summary: List the tenant's leave types
+      operationId: listLeaveTypes
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/LeaveTypeDto' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+    post:
+      tags: [Leave Types]
+      summary: Create a leave type
+      description: If isPaid, immediately creates this period's LeaveBalance row (at quota) for every Active tenant user.
+      operationId: createLeaveType
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateLeaveTypeRequest' } } }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/LeaveTypeDto' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '409':
+          description: Name already used (case-insensitive).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A leave type with this name already exists }
+  /leave-types/absence-cap:
+    get:
+      tags: [Leave Types]
+      summary: Get the tenant's concurrent-absence cap
+      operationId: getAbsenceCap
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceCapDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenAbsenceViewer' }
+    put:
+      tags: [Leave Types]
+      summary: Set the tenant's concurrent-absence cap
+      operationId: updateAbsenceCap
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cap]
+              properties: { cap: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceCapDto' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /leave-types/{id}:
+    put:
+      tags: [Leave Types]
+      summary: Update a leave type
+      description: Existing LeaveBalance rows are adjusted by the delta (new − old quota), not reset. Renaming is blocked while requests still reference the old name.
+      operationId: updateLeaveType
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateLeaveTypeRequest' } } }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/LeaveTypeDto' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Leave type not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Leave type not found }
+        '409':
+          description: Rename clash, or rename blocked by referencing requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                clash: { value: { error: A leave type with this name already exists } }
+                referenced: { value: { error: 'Cannot rename "Sick Leave": 4 leave request(s) reference it' } }
+    delete:
+      tags: [Leave Types]
+      summary: Delete a leave type
+      description: Blocked while any tenant request still references the type's name (no soft-archive flag — hard delete only).
+      operationId: deleteLeaveType
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Leave type not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Leave type not found }
+        '409':
+          description: Still referenced by requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: 'Cannot delete "Sick Leave": 4 leave request(s) use it' }
+
+  # ───────────────────────────── Leave Balances ─────────────────────────────
+  /leave-balances/me:
+    get:
+      tags: [Leave Balances]
+      summary: Get the caller's own leave balances for the current year
+      operationId: getMyLeaveBalances
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK (empty array if the caller has no paid-leave balance rows).
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/LeaveBalanceDto' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────── Holidays ─────────────────────────────
+  /holidays:
+    get:
+      tags: [Holidays]
+      summary: List the tenant's holidays for a calendar year
+      operationId: listHolidays
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, minimum: 2000, maximum: 2100 }
+          example: 2026
+      responses:
+        '200':
+          description: Holidays sorted by date ascending.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows: { type: array, items: { $ref: '#/components/schemas/Holiday' } }
+              example:
+                rows:
+                  - { id: cmrly22b00001rtt16kqp2o69, date: '2026-01-26', name: Republic Day }
+                  - { id: cmrly22b00002rtt1a9dm3xk1, date: '2026-06-15', name: Founders Day }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Caller has no tenant context (platform System Admin).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Tenant context required }
+    post:
+      tags: [Holidays]
+      summary: Create a holiday
+      description: >
+        Weekend dates are accepted but have no effect on working-day math (documented
+        no-op). One holiday per tenant per date, enforced by a DB unique constraint.
+        Audit-logged.
+      operationId: createHoliday
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HolidayCreate' }
+            example: { date: '2026-06-15', name: Founders Day }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Holiday' }
+              example: { id: cmrly22b00001rtt16kqp2o69, date: '2026-06-15', name: Founders Day }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenHolidayWrite' }
+        '409':
+          description: A holiday already exists on this date for the tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A holiday already exists on this date }
+  /holidays/{id}:
+    put:
+      tags: [Holidays]
+      summary: Update a holiday's date and/or name
+      description: At least one of date/name is required. Audit-logged.
+      operationId: updateHoliday
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HolidayUpdate' }
+            example: { name: Founders Day (observed) }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Holiday' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenHolidayWrite' }
+        '404': { $ref: '#/components/responses/HolidayNotFound' }
+        '409':
+          description: The new date collides with an existing holiday.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: A holiday already exists on this date }
+    delete:
+      tags: [Holidays]
+      summary: Delete a holiday
+      description: Audit-logged. Deleting a past holiday retroactively changes historical reports (documented v1 trade-off).
+      operationId: deleteHoliday
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted. No body. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenHolidayWrite' }
+        '404': { $ref: '#/components/responses/HolidayNotFound' }
+
+  # ───────────────────────────── Front Desk ─────────────────────────────
+  /front-desk/today:
+    get:
+      tags: [Front Desk]
+      summary: Today's visitor board (expected / on-site / checked-out)
+      description: Scoped to Visitor-form requests whose visit date falls in "today" (Asia/Kolkata). Single-day interpretation only.
+      operationId: getFrontDeskToday
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/FrontDeskTodayResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenFrontDesk' }
+  /front-desk/{requestId}/check-in:
+    post:
+      tags: [Front Desk]
+      summary: Check in a visitor (captures consent + signature)
+      operationId: checkInVisitor
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signature, consent]
+              properties:
+                signature: { type: string, description: 'data:image/...;base64,... URL.' }
+                consent: { type: boolean }
+      responses:
+        '200': { description: Checked in., content: { application/json: { schema: { $ref: '#/components/schemas/RequestDto' } } } }
+        '400':
+          description: Signature isn't a valid base64 image data URL, or validation failure.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Signature must be a base64 image data URL }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenFrontDesk' }
+        '404': { description: Request not found., content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: Request status changed concurrently — retry.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /front-desk/{requestId}/signature-url:
+    get:
+      tags: [Front Desk]
+      summary: Get a short-lived signed URL to the visitor's signature image
+      operationId: getVisitorSignatureUrl
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { type: object, required: [url], properties: { url: { type: string } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenFrontDesk' }
+        '404':
+          description: No signature on file for this visitor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: No signature on file for this visitor }
+
+  # ───────────────────────────── Item Catalog ─────────────────────────────
+  /item-catalog:
+    get:
+      tags: [Item Catalog]
+      summary: List the tenant's IT item catalog (incl. archived)
+      operationId: listItemCatalog
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ItemCatalogDto' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+    post:
+      tags: [Item Catalog]
+      summary: Add a catalog item
+      operationId: createItemCatalogEntry
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, name]
+              properties:
+                type: { type: string, enum: [software, hardware] }
+                name: { type: string, minLength: 1 }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/ItemCatalogDto' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '409':
+          description: Name already exists for this type in this tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: An item with this name already exists in this catalog }
+  /item-catalog/{id}:
+    put:
+      tags: [Item Catalog]
+      summary: Rename or archive/unarchive a catalog item
+      operationId: updateItemCatalogEntry
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1 }
+                archived: { type: boolean }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/ItemCatalogDto' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Catalog item not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Catalog item not found }
+    delete:
+      tags: [Item Catalog]
+      summary: Delete a catalog item
+      description: Only allowed when never referenced by any IT request — archive it instead if it is.
+      operationId: deleteItemCatalogEntry
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Catalog item not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Catalog item not found }
+        '409':
+          description: Referenced by past requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: This item is referenced by past requests and cannot be deleted — archive it instead. }
+
+  # ───────────────────────────── Absences ─────────────────────────────
+  /absences:
+    get:
+      tags: [Absences]
+      summary: Cross-employee absence calendar for a date range
+      description: >
+        Scope depends on the caller's role: HR Head/Enterprise Admin see all
+        (with reasons); Project Manager/Tech Lead see only their led projects
+        (no reasons); any other role gets 403.
+      operationId: listAbsences
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: departmentId, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [leave, wfh] } }
+        - { name: personId, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/AbsenceRangeResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Caller's role has no absence visibility.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: No absence visibility for this role }
+  /absences/over-cap:
+    get:
+      tags: [Absences]
+      summary: Days where concurrent absences exceed the tenant's cap (HR/Admin only)
+      operationId: listOverCapDays
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: projectId, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/OverCapResponse' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: PM/Tech Lead explicitly blocked from this panel, or role has no absence visibility at all.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                pmTl: { value: { error: Over-cap panel is HR/Admin only } }
+                noVisibility: { value: { error: No absence visibility for this role } }
+
+  # ───────────────────────────── Attendance Report ─────────────────────────────
+  /reports/attendance:
+    get:
+      tags: [Attendance Report]
+      summary: Per-employee payable days for a calendar month (paginated)
+      description: >
+        One row per employee, sorted by name. Only Approved leave/WFH requests count;
+        ranges are clipped to the month and counted on working days only; half-day
+        dates count 0.5. includeInactive=true additionally includes Inactive and
+        Suspended users (never Pending). The current month is allowed and flagged
+        isPartialMonth: true. No pro-rating for mid-month joiners/leavers — rows
+        carry status and joinedAt for manual adjustment.
+      operationId: getAttendanceReport
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          example: '2026-06'
+        - name: departmentId
+          in: query
+          required: false
+          schema: { type: string }
+          description: Must belong to the caller's tenant; otherwise 400 "Unknown department".
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: string, enum: ['true', 'false'] }
+          description: Query-string boolean; anything other than "true"/"false" is treated as absent.
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: The month's report page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceReportResponse' }
+              example:
+                month: '2026-06'
+                isPartialMonth: false
+                calendarDays: 30
+                weekendDays: 8
+                holidayCount: 1
+                workingDays: 21
+                rows:
+                  - userId: cmrly1j50000orth7ijkd8dic
+                    name: Asha Patel
+                    email: asha@acme.com
+                    departments: [Engineering]
+                    status: Active
+                    joinedAt: '2025-11-03'
+                    workingDays: 21
+                    wfhDays: 4
+                    paidLeaveDays: 1.5
+                    unpaidLeaveDays: 2
+                    officeDays: 13.5
+                    payableDays: 19
+                total: 143
+                page: 1
+                pageSize: 20
+        '400':
+          description: Validation failure, a future month, or an unknown department.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                futureMonth: { value: { error: Cannot report on a future month } }
+                unknownDepartment: { value: { error: Unknown department } }
+                badMonth:
+                  value:
+                    error: Validation failed
+                    details: { formErrors: [], fieldErrors: { month: [Expected YYYY-MM] } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenAttendance' }
+  /reports/attendance/export:
+    get:
+      tags: [Attendance Report]
+      summary: CSV export of the attendance report (all rows, no pagination)
+      description: >
+        Same authorization and query rules as the JSON view, minus page/pageSize
+        (accepted but ignored — all rows are always exported; invalid values such
+        as page=0 still fail validation with 400). Values are identical to the
+        JSON figures. Cells are RFC 4180-quoted and
+        formula-prefixed cells (=, +, -, @) are neutralized with a leading apostrophe.
+        Columns: Employee, Email, Departments, Status, Joined, Working Days, WFH Days,
+        Paid Leave, Unpaid Leave (LWP), Office Days, Payable Days.
+      operationId: exportAttendanceCsv
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          example: '2026-06'
+        - name: departmentId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: includeInactive
+          in: query
+          required: false
+          schema: { type: string, enum: ['true', 'false'] }
+      responses:
+        '200':
+          description: >
+            CSV attachment (Content-Disposition: attachment; filename="attendance-<YYYY-MM>.csv").
+          content:
+            text/csv:
+              schema: { type: string }
+              example: |
+                Employee,Email,Departments,Status,Joined,Working Days,WFH Days,Paid Leave,Unpaid Leave (LWP),Office Days,Payable Days
+                Asha Patel,asha@acme.com,Engineering,Active,2025-11-03,21,4,1.5,2,13.5,19
+        '400':
+          description: Validation failure, a future month, or an unknown department.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenAttendance' }
+
+  # ───────────────────────────── Slack ─────────────────────────────
+  /slack/config:
+    get:
+      tags: [Slack]
+      summary: Get the tenant's Slack connection status/settings
+      description: Never includes credential fields. Upserts a disconnected singleton row on first read.
+      operationId: getSlackConfig
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK., content: { application/json: { schema: { $ref: '#/components/schemas/SlackConfigDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /slack/config/connect:
+    post:
+      tags: [Slack]
+      summary: Connect a Slack workspace
+      description: Credentials are verified against Slack's auth.test API before anything is persisted; both are encrypted at rest.
+      operationId: connectSlack
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [botToken, signingSecret, defaultChannel]
+              properties:
+                botToken: { type: string, minLength: 1 }
+                signingSecret: { type: string, minLength: 1 }
+                defaultChannel: { type: string, minLength: 1 }
+      responses:
+        '200': { description: Connected., content: { application/json: { schema: { $ref: '#/components/schemas/SlackConfigDto' } } } }
+        '400':
+          description: Validation failure, or Slack rejected the credentials.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Could not verify these Slack credentials. Check the bot token and try again. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /slack/config/disconnect:
+    post:
+      tags: [Slack]
+      summary: Disconnect the tenant's Slack workspace
+      operationId: disconnectSlack
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Disconnected., content: { application/json: { schema: { $ref: '#/components/schemas/SlackConfigDto' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+        '404':
+          description: Slack is not configured for this tenant.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Slack is not configured for this tenant }
+  /slack/config/test:
+    post:
+      tags: [Slack]
+      summary: Send a test message to the default channel
+      operationId: testSlackConnection
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Test message sent. }
+        '400':
+          description: Not connected/no default channel, or the send itself failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: Could not send a test message. Check the bot token has access to the default channel. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /slack/config/settings:
+    put:
+      tags: [Slack]
+      summary: Update Slack notification settings
+      description: Never touches stored credentials.
+      operationId: updateSlackSettings
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notifyApproversOnNewRequest, notifyRequesterOnDecision, notifyRequesterOnStatusChange, digestEnabled, reminderEnabled]
+              properties:
+                defaultChannel: { type: string, minLength: 1 }
+                notifyApproversOnNewRequest: { type: boolean }
+                notifyRequesterOnDecision: { type: boolean }
+                notifyRequesterOnStatusChange: { type: boolean }
+                digestEnabled: { type: boolean }
+                digestChannel: { type: string, nullable: true }
+                digestTime: { type: string, nullable: true }
+                reminderEnabled: { type: boolean }
+      responses:
+        '200': { description: Updated., content: { application/json: { schema: { $ref: '#/components/schemas/SlackConfigDto' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/ForbiddenEnterpriseAdmin' }
+  /slack/interactions:
+    post:
+      tags: [Slack]
+      summary: Slack interactivity webhook (inbound from Slack, not a client-callable endpoint)
+      description: >
+        x-internal: called by Slack's own servers when a user clicks an
+        Approve/Reject button or submits the reject-reason modal. Authenticated
+        via HMAC signature (x-slack-signature/x-slack-request-timestamp) against
+        the tenant's stored signing secret — not a Bearer token. Body is
+        application/x-www-form-urlencoded with a single `payload` field
+        (JSON-encoded Slack interaction). Always returns an empty 200
+        immediately (Slack's 3-second ack requirement); actual handling
+        (resolving the Slack user to a platform user, then calling the same
+        decision engine as POST /requests/{id}/decisions) runs asynchronously
+        and errors are only logged, never surfaced to Slack as an HTTP error.
+      operationId: slackInteractionsWebhook
+      x-internal: true
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [payload]
+              properties: { payload: { type: string, description: JSON-encoded Slack block_actions or view_submission payload. } }
+      responses:
+        '200': { description: Acknowledged (always, before async handling). }
+        '400': { description: 'Missing/unparseable payload, or no team.id in it.' }
+        '401': { description: Unknown/disconnected Slack team, or signature verification failed. }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from POST /auth/login.
+
+  responses:
+    Unauthorized:
+      description: Missing, malformed, or expired bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: Missing or invalid Authorization header }
+    ValidationFailed:
+      description: Request failed Zod validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: Validation failed
+            details: { formErrors: [], fieldErrors: {} }
+    ForbiddenSystemAdmin:
+      description: Caller is not the platform System Admin.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: System Admin access required }
+    ForbiddenEnterpriseAdmin:
+      description: Caller lacks the Enterprise Admin role in their own tenant, or has no tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: Enterprise Admin access required }
+    ForbiddenItAdmin:
+      description: Caller lacks the IT Admin role, or has no tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: IT Admin access required }
+    ForbiddenAbsenceViewer:
+      description: Caller lacks one of enterprise-admin/hr-head/project-manager/tech-lead, or has no tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'One of these roles is required: enterprise-admin, hr-head, project-manager, tech-lead' }
+    ForbiddenHolidayWrite:
+      description: Caller lacks HR Head / Enterprise Admin (manage_holidays), or has no tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'One of these roles is required: hr-head, enterprise-admin' }
+    ForbiddenAttendance:
+      description: Caller lacks finance / enterprise-admin (view_attendance_report), or has no tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'One of these roles is required: finance, enterprise-admin' }
+    ForbiddenFrontDesk:
+      description: Caller lacks Enterprise Admin or HR Head.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: Front Desk access required }
+    HolidayNotFound:
+      description: No holiday with this id in the caller's tenant (foreign-tenant ids also 404).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: Holiday not found }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        details:
+          description: 'Present on validation failures: Zod flatten() output ({ formErrors, fieldErrors }).'
+          type: object
+
+    # ── Auth ──
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties: { email: { type: string, format: email }, password: { type: string, minLength: 1 } }
+    AuthUser:
+      type: object
+      required: [id, name, email, isSystemAdmin, mustChangePassword, tenantId, tenantName, roles]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        isSystemAdmin: { type: boolean }
+        mustChangePassword: { type: boolean }
+        tenantId: { type: string, nullable: true }
+        tenantName: { type: string, nullable: true }
+        roles: { type: array, items: { type: string } }
+    LoginResponse:
+      type: object
+      required: [user, accessToken, refreshToken]
+      properties:
+        user: { $ref: '#/components/schemas/AuthUser' }
+        accessToken: { type: string }
+        refreshToken: { type: string }
+
+    # ── Registrations ──
+    RegisterEnterpriseRequest:
+      type: object
+      required: [companyName, industry, size, contactName, contactEmail, password]
+      properties:
+        companyName: { type: string, minLength: 1 }
+        industry: { type: string, minLength: 1 }
+        size: { type: string, minLength: 1 }
+        website: { type: string }
+        contactName: { type: string, minLength: 1 }
+        contactEmail: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    EnterpriseRegistrationDto:
+      type: object
+      required: [id, companyName, contactName, contactEmail, size, industry, website, status, reviewNote, createdAt]
+      properties:
+        id: { type: string }
+        companyName: { type: string }
+        contactName: { type: string }
+        contactEmail: { type: string }
+        size: { type: string, nullable: true }
+        industry: { type: string, nullable: true }
+        website: { type: string, nullable: true }
+        status: { type: string, enum: [Pending, Accepted, Rejected] }
+        reviewNote: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    RegistrationsResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/EnterpriseRegistrationDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    # ── Self-Registration ──
+    RegistrationLink:
+      type: object
+      required: [url, expiresAt, expired]
+      properties:
+        url: { type: string }
+        expiresAt: { type: string, format: date-time }
+        expired: { type: boolean }
+
+    # ── Profile ──
+    ProfileDto:
+      type: object
+      required: [id, name, email, phone, jobTitle, location, roles, departments]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        phone: { type: string, nullable: true }
+        jobTitle: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        roles: { type: array, items: { type: string } }
+        departments: { type: array, items: { type: string } }
+    NotificationPreferenceRow:
+      type: object
+      required: [type, label, mandatory, inApp, slack]
+      properties:
+        type: { type: string }
+        label: { type: string }
+        mandatory: { type: boolean }
+        inApp: { type: boolean }
+        slack: { type: boolean }
+    NotificationPreferencesResponse:
+      type: object
+      required: [rows]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/NotificationPreferenceRow' } }
+
+    # ── Enterprise Profile ──
+    EnterpriseDetailsDto:
+      type: object
+      required: [id, name, industry, size, website]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        industry: { type: string, nullable: true }
+        size: { type: string, nullable: true }
+        website: { type: string, nullable: true }
+
+    # ── Enterprises ──
+    EnterpriseDto:
+      type: object
+      required: [id, name, industry, users, since, status]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        industry: { type: string, nullable: true }
+        users: { type: integer }
+        since: { type: string, format: date-time }
+        status: { type: string, enum: [Active, Suspended] }
+    EnterprisesResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/EnterpriseDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    # ── Platform Users ──
+    PlatformUserDto:
+      type: object
+      required: [id, name, email, role, enterpriseName, status, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, description: 'System Admin, comma-joined role names, or "No role".' }
+        enterpriseName: { type: string }
+        status: { type: string, enum: [Pending, Active, Inactive, Suspended] }
+        createdAt: { type: string, format: date-time }
+    PlatformUsersResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/PlatformUserDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    # ── Org Users ──
+    OrgUserDto:
+      type: object
+      required: [id, name, email, status, roles, departments, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        status: { type: string, enum: [Pending, Active, Inactive, Suspended] }
+        roles: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } }
+        departments: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } }
+        createdAt: { type: string, format: date-time }
+    OrgUsersResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/OrgUserDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    OrgUserPickerDto:
+      type: object
+      required: [id, name]
+      properties: { id: { type: string }, name: { type: string } }
+    OrgUserStats:
+      type: object
+      required: [active, inactive, pending, departments]
+      properties:
+        active: { type: integer }
+        inactive: { type: integer }
+        pending: { type: integer }
+        departments: { type: integer }
+    CreateOrgUserRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 1 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        roleIds: { type: array, items: { type: string }, default: [] }
+        departmentIds: { type: array, items: { type: string }, default: [] }
+    UpdateOrgUserRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        roleIds: { type: array, items: { type: string }, default: [] }
+        departmentIds: { type: array, items: { type: string }, default: [] }
+
+    # ── Departments ──
+    DepartmentDto:
+      type: object
+      required: [id, name, heads, memberCount, archived]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        heads: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } }
+        memberCount: { type: integer }
+        archived: { type: boolean }
+    DepartmentsResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/DepartmentDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    CreateDepartmentRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        headUserIds: { type: array, items: { type: string }, default: [] }
+
+    # ── Roles ──
+    RoleDto:
+      type: object
+      required: [id, name, isSystem, permissions, memberCount, archived]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        isSystem: { type: boolean }
+        permissions: { type: array, items: { type: string } }
+        memberCount: { type: integer }
+        archived: { type: boolean }
+    RolesResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/RoleDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    CreateRoleRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name: { type: string, minLength: 1 }
+        permissions: { type: array, items: { type: string }, description: Every entry must be a known permission key. }
+
+    # ── Settings ──
+    PlatformSettings:
+      type: object
+      required: [forcePasswordChangeOnFirstLogin, allowPublicRegistration, notifyOnNewRegistration]
+      properties:
+        forcePasswordChangeOnFirstLogin: { type: boolean }
+        allowPublicRegistration: { type: boolean }
+        notifyOnNewRegistration: { type: boolean }
+
+    # ── Audit Log ──
+    AuditLogEntry:
+      type: object
+      required: [id, at, actor, actorId, tenant, tenantId, entity, entityId, action, before, after]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: string, nullable: true }
+        actorId: { type: string, nullable: true }
+        tenant: { type: string, nullable: true }
+        tenantId: { type: string, nullable: true }
+        entity: { type: string }
+        entityId: { type: string }
+        action: { type: string }
+        before: { nullable: true }
+        after: { nullable: true }
+    AuditLogResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/AuditLogEntry' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    # ── Notifications ──
+    NotificationDto:
+      type: object
+      required: [id, type, payload, read, createdAt]
+      description: Discriminated union on type — payload shape varies (enterprise_registered, request_approved, request_rejected, request_needs_approval, request_status_changed, approval_reminder, request_decision_update, approval_peer_decided, approval_escalated).
+      properties:
+        id: { type: string }
+        type: { type: string }
+        payload: { type: object, additionalProperties: true }
+        read: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    NotificationsResponse:
+      type: object
+      required: [rows, total, unreadCount, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/NotificationDto' } }
+        total: { type: integer }
+        unreadCount: { type: integer, description: "Caller's total unread count, independent of tab/pagination." }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    # ── Overview ──
+    OverviewResponse:
+      type: object
+      required: [counts, latestRegistrations, recentActivity]
+      properties:
+        counts:
+          type: object
+          required: [pending, active, users, suspended]
+          properties: { pending: { type: integer }, active: { type: integer }, users: { type: integer }, suspended: { type: integer } }
+        latestRegistrations:
+          type: array
+          items:
+            type: object
+            required: [id, companyName, contactName, status, createdAt]
+            properties:
+              id: { type: string }
+              companyName: { type: string }
+              contactName: { type: string }
+              status: { type: string, enum: [Pending, Accepted, Rejected] }
+              createdAt: { type: string, format: date-time }
+        recentActivity:
+          type: array
+          items:
+            type: object
+            required: [id, actor, action, target, at]
+            properties:
+              id: { type: string }
+              actor: { type: string }
+              action: { type: string, enum: [accept, reject, suspend, reactivate] }
+              target: { type: string }
+              at: { type: string, format: date-time }
+
+    # ── Search ──
+    GlobalSearchResponse:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            type: object
+            required: [type, label, items]
+            properties:
+              type: { type: string, enum: [request, user, project, department, enterprise, registration, platform-user] }
+              label: { type: string }
+              items:
+                type: array
+                items:
+                  type: object
+                  required: [type, id, title, subtitle]
+                  properties:
+                    type: { type: string }
+                    id: { type: string }
+                    title: { type: string }
+                    subtitle: { type: string, nullable: true }
+
+    # ── Projects ──
+    ProjectDto:
+      type: object
+      required: [id, name, status, pm, techLead, members, memberCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [active, archived] }
+        pm: { nullable: true, type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+        techLead: { nullable: true, type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+        members: { type: array, items: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } } }
+        memberCount: { type: integer }
+    ProjectsResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/ProjectDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        status: { type: string, enum: [active, archived], default: active }
+        pmUserId: { type: string, nullable: true, default: null }
+        techLeadUserId: { type: string, nullable: true, default: null }
+        memberIds: { type: array, items: { type: string }, default: [] }
+
+    # ── Forms (form-engine) ──
+    FieldType:
+      type: string
+      enum: [text, textarea, number, date, datetime, time, daterange, date-multi, single-select, multi-select, radio, checkbox, checkbox-group, user-picker, project-picker, signature, file-upload, consent-link, section, group]
+    VisibilityRule:
+      type: object
+      description: 'Small declarative rule-tree: {v:1, when: {field,op,value} | {and:[...]} | {or:[...]}}.'
+      additionalProperties: true
+    FormField:
+      type: object
+      required: [key, label, type, required]
+      properties:
+        key: { type: string, minLength: 1 }
+        label: { type: string, minLength: 1 }
+        helpText: { type: string }
+        type: { $ref: '#/components/schemas/FieldType' }
+        required: { type: boolean, default: false }
+        options:
+          description: Either a static {value,label}[] list, a picker config {multi?, roles?, departments?, source?}, or a live catalog marker (item-catalog:<type>, departments, leave-types).
+          additionalProperties: true
+        validation:
+          type: object
+          properties:
+            minLength: { type: integer }
+            maxLength: { type: integer }
+            min: { type: number }
+            max: { type: number }
+            dateOrder: { description: 'boolean, or {afterField: string}.' }
+        visibilityRule: { $ref: '#/components/schemas/VisibilityRule' }
+    FormSection:
+      type: object
+      required: [order, title, fields]
+      properties:
+        order: { type: integer }
+        title: { type: string }
+        visibilityRule: { $ref: '#/components/schemas/VisibilityRule' }
+        fields: { type: array, items: { $ref: '#/components/schemas/FormField' } }
+    StatusModel:
+      type: object
+      required: [states, transitions]
+      properties:
+        states: { type: array, items: { type: string }, minItems: 1 }
+        transitions:
+          type: array
+          items:
+            type: object
+            required: [from, to, roles]
+            properties:
+              from: { type: string }
+              to: { type: string }
+              roles: { type: array, items: { type: string }, minItems: 1, description: "Real Role.key values, or the reserved tokens 'requester' / 'system'." }
+    FormDefinition:
+      type: object
+      required: [id, key, title, version, renderer, status, sections, approvalWorkflow, statusModel]
+      properties:
+        id: { type: string }
+        key: { type: string }
+        title: { type: string }
+        version: { type: integer }
+        renderer: { type: string, enum: [core, generic] }
+        status: { type: string, enum: [draft, published, archived] }
+        sections: { type: array, items: { $ref: '#/components/schemas/FormSection' } }
+        approvalWorkflow:
+          nullable: true
+          type: object
+          properties: { mode: { type: string }, stageRules: {} }
+        statusModel:
+          nullable: true
+          type: object
+          properties: { states: {}, transitions: {} }
+    FormDefinitionSummary:
+      type: object
+      required: [key, title, version, renderer, status]
+      properties:
+        key: { type: string }
+        title: { type: string }
+        version: { type: integer }
+        renderer: { type: string, enum: [core, generic] }
+        status: { type: string, enum: [draft, published, archived] }
+    FormBuilderListItem:
+      type: object
+      required: [key, title, renderer, status, fieldCount, updatedAt]
+      properties:
+        key: { type: string }
+        title: { type: string }
+        renderer: { type: string, enum: [core, generic] }
+        status: { type: string, enum: [draft, published, archived] }
+        fieldCount: { type: integer }
+        updatedAt: { type: string, format: date-time }
+
+    # ── Requests ──
+    RequestDto:
+      type: object
+      required: [id, formKey, status, createdAt]
+      properties:
+        id: { type: string }
+        formKey: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+    RequestListItemDto:
+      type: object
+      required: [id, formKey, formTitle, status, createdAt, startDate, endDate, approversTotal, approversDecided]
+      properties:
+        id: { type: string }
+        formKey: { type: string }
+        formTitle: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        startDate: { type: string, format: date, nullable: true }
+        endDate: { type: string, format: date, nullable: true }
+        approversTotal: { type: integer }
+        approversDecided: { type: integer }
+    MyRequestsResponse:
+      type: object
+      required: [rows, total, page, pageSize]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/RequestListItemDto' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    ApprovalChainEntryDto:
+      type: object
+      required: [approverId, approverName, roleContext, decision, comment, escalatedFromName, escalationCause]
+      properties:
+        approverId: { type: string }
+        approverName: { type: string }
+        roleContext: { type: string }
+        decision: { type: string, enum: [pending, approved, rejected] }
+        comment: { type: string, nullable: true }
+        escalatedFromName: { type: string, nullable: true }
+        escalationCause: { type: string, nullable: true, enum: [on_leave, inactive, timeout, null] }
+    ApprovalQueueItemDto:
+      type: object
+      required: [requestId, formKey, formTitle, requesterId, requesterName, requesterJobTitle, startDate, endDate, submittedAt, status, myDecision, chain, overBalance, specialConditionFlagged]
+      properties:
+        requestId: { type: string }
+        formKey: { type: string }
+        formTitle: { type: string }
+        requesterId: { type: string }
+        requesterName: { type: string }
+        requesterJobTitle: { type: string, nullable: true }
+        startDate: { type: string, format: date, nullable: true }
+        endDate: { type: string, format: date, nullable: true }
+        submittedAt: { type: string, format: date-time }
+        status: { type: string }
+        myDecision: { type: string, enum: [pending, approved, rejected] }
+        chain: { type: array, items: { $ref: '#/components/schemas/ApprovalChainEntryDto' } }
+        overBalance: { type: boolean, nullable: true }
+        specialConditionFlagged: { type: boolean, nullable: true }
+    ApprovalQueueResponse:
+      type: object
+      required: [rows, awaitingCount, decidedCount]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/ApprovalQueueItemDto' } }
+        awaitingCount: { type: integer }
+        decidedCount: { type: integer }
+    FulfilmentQueueItemDto:
+      type: object
+      required: [requestId, requesterName, departmentId, category, items, impact, status, assigneeId, assigneeName, approvedAt, fulfilledAt]
+      properties:
+        requestId: { type: string }
+        requesterName: { type: string }
+        departmentId: { type: string, nullable: true }
+        category: { type: string, enum: [Software, Hardware] }
+        items: { type: array, items: { type: string } }
+        impact: { type: string, nullable: true }
+        status: { type: string }
+        assigneeId: { type: string, nullable: true }
+        assigneeName: { type: string, nullable: true }
+        approvedAt: { type: string, format: date-time, nullable: true }
+        fulfilledAt: { type: string, format: date-time, nullable: true }
+    FulfilmentQueueResponse:
+      type: object
+      required: [rows, queuedCount, inProgressCount, fulfilledCount]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/FulfilmentQueueItemDto' } }
+        queuedCount: { type: integer }
+        inProgressCount: { type: integer }
+        fulfilledCount: { type: integer }
+    RequestDetail:
+      type: object
+      required: [id, formKey, formTitle, status, payload, createdAt, startDate, endDate, definition, requesterId, approvers, overBalance, specialConditionFlagged]
+      properties:
+        id: { type: string }
+        formKey: { type: string }
+        formTitle: { type: string }
+        status: { type: string }
+        payload: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+        startDate: { type: string, format: date, nullable: true }
+        endDate: { type: string, format: date, nullable: true }
+        definition: { $ref: '#/components/schemas/FormDefinition' }
+        requesterId: { type: string }
+        approvers: { type: array, items: { $ref: '#/components/schemas/ApprovalChainEntryDto' } }
+        overBalance: { type: boolean, nullable: true }
+        specialConditionFlagged: { type: boolean, nullable: true }
+
+    # ── Escalation Rules ──
+    EscalationRuleDto:
+      type: object
+      required: [id, fromContext, toRoleId, toRoleName, actionWindowHours]
+      properties:
+        id: { type: string }
+        fromContext: { type: string }
+        toRoleId: { type: string }
+        toRoleName: { type: string }
+        actionWindowHours: { type: integer }
+
+    # ── Leave Types / Balances ──
+    LeaveTypeDto:
+      type: object
+      required: [id, name, quota, isPaid, carryForward, halfDayAllowed]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        quota: { type: number }
+        isPaid: { type: boolean }
+        carryForward: { type: boolean }
+        halfDayAllowed: { type: boolean }
+    CreateLeaveTypeRequest:
+      type: object
+      required: [name, quota, isPaid, carryForward, halfDayAllowed]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        quota: { type: number, minimum: 0 }
+        isPaid: { type: boolean }
+        carryForward: { type: boolean }
+        halfDayAllowed: { type: boolean }
+    UpdateLeaveTypeRequest:
+      type: object
+      required: [quota, carryForward, halfDayAllowed]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        quota: { type: number, minimum: 0 }
+        isPaid: { type: boolean }
+        carryForward: { type: boolean }
+        halfDayAllowed: { type: boolean }
+    AbsenceCapDto:
+      type: object
+      required: [cap]
+      properties: { cap: { type: integer } }
+    LeaveBalanceDto:
+      type: object
+      required: [leaveTypeId, leaveTypeName, used, total]
+      properties:
+        leaveTypeId: { type: string }
+        leaveTypeName: { type: string }
+        used: { type: number }
+        total: { type: number }
+
+    # ── Holidays ──
+    Holiday:
+      type: object
+      required: [id, date, name]
+      properties:
+        id: { type: string }
+        date: { type: string, format: date, description: Calendar day (YYYY-MM-DD, UTC) }
+        name: { type: string }
+    HolidayCreate:
+      type: object
+      required: [date, name]
+      properties:
+        date:
+          type: string
+          format: date
+          description: Must be a real calendar date (2026-02-30 is rejected; Feb 29 only in leap years).
+        name: { type: string, minLength: 1, maxLength: 100, description: Trimmed server-side. }
+    HolidayUpdate:
+      type: object
+      minProperties: 1
+      description: At least one field is required.
+      properties:
+        date: { type: string, format: date }
+        name: { type: string, minLength: 1, maxLength: 100 }
+
+    # ── Front Desk ──
+    FrontDeskVisitorDto:
+      type: object
+      required: [requestId, visitorName, mobile, hostName, purpose, visitDatetime, outTime, laptopDetails, status, checkInAt, checkOutAt]
+      properties:
+        requestId: { type: string }
+        visitorName: { type: string }
+        mobile: { type: string }
+        hostName: { type: string }
+        purpose: { type: string }
+        visitDatetime: { type: string, format: date-time, nullable: true }
+        outTime: { type: string, format: date-time, nullable: true }
+        laptopDetails: { type: string, nullable: true }
+        status: { type: string }
+        checkInAt: { type: string, format: date-time, nullable: true }
+        checkOutAt: { type: string, format: date-time, nullable: true }
+    FrontDeskTodayResponse:
+      type: object
+      required: [expected, onSite, checkedOut]
+      properties:
+        expected: { type: array, items: { $ref: '#/components/schemas/FrontDeskVisitorDto' } }
+        onSite: { type: array, items: { $ref: '#/components/schemas/FrontDeskVisitorDto' } }
+        checkedOut: { type: array, items: { $ref: '#/components/schemas/FrontDeskVisitorDto' } }
+
+    # ── Item Catalog ──
+    ItemCatalogDto:
+      type: object
+      required: [id, type, name, archived, referenced]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [software, hardware] }
+        name: { type: string }
+        archived: { type: boolean }
+        referenced: { type: boolean, description: True if any IT request payload still references this item's name. }
+
+    # ── Absences ──
+    AbsenceEntryDto:
+      type: object
+      required: [requestId, personId, personName, departmentId, departmentName, projectId, projectName, type, startDate, endDate, halfDayCount]
+      properties:
+        requestId: { type: string }
+        personId: { type: string }
+        personName: { type: string }
+        departmentId: { type: string, nullable: true }
+        departmentName: { type: string, nullable: true }
+        projectId: { type: string, nullable: true }
+        projectName: { type: string, nullable: true }
+        type: { type: string, enum: [leave, wfh] }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        halfDayCount: { type: number, nullable: true }
+        reason: { type: string, nullable: true, description: Present only when the viewer resolves to hr scope. }
+    AbsenceRangeResponse:
+      type: object
+      required: [rows, scope]
+      properties:
+        rows: { type: array, items: { $ref: '#/components/schemas/AbsenceEntryDto' } }
+        scope: { type: string, enum: [hr, management, pm-tl] }
+    OverCapDayDto:
+      type: object
+      required: [date, count, cap, people]
+      properties:
+        date: { type: string, format: date }
+        count: { type: integer }
+        cap: { type: integer }
+        people: { type: array, items: { type: object, required: [personId, personName], properties: { personId: { type: string }, personName: { type: string } } } }
+    OverCapResponse:
+      type: object
+      required: [cap, days]
+      properties:
+        cap: { type: integer }
+        days: { type: array, items: { $ref: '#/components/schemas/OverCapDayDto' } }
+
+    # ── Attendance Report ──
+    AttendanceReportRow:
+      type: object
+      required: [userId, name, email, departments, status, joinedAt, workingDays, wfhDays, paidLeaveDays, unpaidLeaveDays, officeDays, payableDays]
+      properties:
+        userId: { type: string }
+        name: { type: string }
+        email: { type: string }
+        departments: { type: array, items: { type: string } }
+        status: { type: string, enum: [Active, Inactive, Suspended] }
+        joinedAt: { type: string, format: date, description: User.createdAt — proxy for join date (no employment dates in v1). }
+        workingDays: { type: number, description: The month baseline — same value for every row. }
+        wfhDays: { type: number, description: 0.5 steps. }
+        paidLeaveDays: { type: number, description: 0.5 steps; leave types with isPaid=true. }
+        unpaidLeaveDays: { type: number, description: 0.5 steps; LWP (isPaid=false). }
+        officeDays: { type: number, description: 'workingDays − paid − unpaid − wfh, floored at 0.' }
+        payableDays: { type: number, description: 'workingDays − unpaidLeaveDays.' }
+    AttendanceReportResponse:
+      type: object
+      required: [month, isPartialMonth, calendarDays, weekendDays, holidayCount, workingDays, rows, total, page, pageSize]
+      properties:
+        month: { type: string, example: '2026-06' }
+        isPartialMonth: { type: boolean, description: True only when the queried month is the current UTC month. }
+        calendarDays: { type: integer }
+        weekendDays: { type: integer, description: Saturdays + Sundays (fixed rule, v1). }
+        holidayCount: { type: integer, description: Tenant holidays falling on a weekday. }
+        workingDays: { type: integer, description: calendarDays − weekendDays − holidayCount. }
+        rows: { type: array, items: { $ref: '#/components/schemas/AttendanceReportRow' } }
+        total: { type: integer, description: Total matching employees (all pages). }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    # ── Slack ──
+    SlackConfigDto:
+      type: object
+      required: [status, workspaceName, defaultChannel, notifyApproversOnNewRequest, notifyRequesterOnDecision, notifyRequesterOnStatusChange, digestEnabled, digestChannel, digestTime, reminderEnabled, lastErrorMessage]
+      properties:
+        status: { type: string, enum: [disconnected, connected, error] }
+        workspaceName: { type: string, nullable: true }
+        defaultChannel: { type: string, nullable: true }
+        notifyApproversOnNewRequest: { type: boolean }
+        notifyRequesterOnDecision: { type: boolean }
+        notifyRequesterOnStatusChange: { type: boolean }
+        digestEnabled: { type: boolean }
+        digestChannel: { type: string, nullable: true }
+        digestTime: { type: string, nullable: true }
+        reminderEnabled: { type: boolean }
+        lastErrorMessage: { type: string, nullable: true }
