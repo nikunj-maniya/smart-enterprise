@@ -25,6 +25,12 @@ Act as a cautious, high-precision senior engineer. Prioritize simplicity, correc
 - Before implementing or modifying any UI/UX-related task (screens, components, styling, layout, forms), dispatch a subagent to fetch and review the relevant markup from the Claude Design project via the DesignSync tool (`get_file`, projectId `053346e7-8a9a-4991-b4a0-26705793f93b`, primary file `Smart Enterprise - Prototype.dc.html`) rather than fetching it inline. Have the subagent report back a summary of the relevant markup/structure/tokens.
 - Implement to match the design exactly — colors/tokens, interactive behavior, not just static layout.
 
+## 6. Prompt Quality Self-Check
+Before acting on any non-trivial prompt, silently assess it against the three axes the team is scored on, and close gaps rather than guessing past them:
+- **Specificity & constraints:** If requirements, constraints, or acceptance criteria are vague or missing, don't guess silently — name the ambiguity and ask (this reinforces Rule 1).
+- **Examples & output format:** If the ask involves generating code/content and no input/output example or format/schema was given, either ask for one or state the format you're assuming before producing output.
+- **Decomposition & role framing:** For multi-step or cross-cutting requests, explicitly break the request into steps/roles before executing (this is what the Multi-Agent Workflow below formalizes) rather than diving straight into a single-pass answer.
+
 # Multi-Agent Engineering Workflow
 
 For every non-trivial task, bug, or request (the trivial-task carve-out above still applies — obvious one-liners/typo fixes don't need this ceremony), operate as a coordinated team instead of a single pass. Do not immediately write code — plan and delegate first.
