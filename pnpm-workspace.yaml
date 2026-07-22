@@ -2,6 +2,12 @@ packages:
   - "apps/*"
   - "packages/*"
 
+# GHSA-3jxr-9vmj-r5cp / GHSA-8r6m-32jq-jx6q: pin transitive deps past their
+# `pnpm audit --audit-level=high` advisories (no direct upgrade path available).
+overrides:
+  "minimatch@3>brace-expansion": "^1.1.16"
+  fast-xml-parser: ">=5.10.1"
+
 # pnpm v11 removed `onlyBuiltDependencies` (package.json's `pnpm` field is no longer read at all)
 # in favor of this workspace-level allow-list — same five packages' install scripts as before.
 allowBuilds:
