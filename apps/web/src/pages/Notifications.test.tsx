@@ -55,7 +55,7 @@ const approvalNotif: NotificationDto = {
 const approvedNotif: NotificationDto = {
   id: 'n-2',
   type: 'request_approved',
-  payload: { requestId: 'r-2', approverName: 'Grace Hopper', formTitle: 'WFH' },
+  payload: { requestId: 'r-2', formKey: 'wfh', approverName: 'Grace Hopper', formTitle: 'WFH' },
   read: true,
   createdAt: new Date().toISOString(),
 };

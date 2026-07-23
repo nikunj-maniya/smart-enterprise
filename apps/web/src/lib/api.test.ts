@@ -296,10 +296,10 @@ test('createLeaveType POSTs the new type to /leave-types', async () => {
 
 test('updateLeaveType PUTs partial changes to /leave-types/:id', async () => {
   stubs.push({ method: 'PUT', path: '/leave-types/lt-1', status: 200, body: { id: 'lt-1' } });
-  await updateLeaveType('lt-1', { quota: 15 });
+  await updateLeaveType('lt-1', { quota: 15, carryForward: false, halfDayAllowed: true });
   assert.equal(requests[0].method, 'PUT');
   assert.equal(requests[0].path, '/leave-types/lt-1');
-  assert.deepEqual(requests[0].body, { quota: 15 });
+  assert.deepEqual(requests[0].body, { quota: 15, carryForward: false, halfDayAllowed: true });
 });
 
 test('deleteLeaveType issues a DELETE to /leave-types/:id', async () => {
