@@ -8,7 +8,7 @@ import {
   type OverviewResponse,
 } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/formatRelativeTime';
 
 const STATUS_STYLE: Record<RegistrationStatus, { bg: string; fg: string; dot: string; label: string }> = {
@@ -96,14 +96,19 @@ function StatCard({
 
 export default function Overview() {
   const [data, setData] = React.useState<OverviewResponse | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    apiFetch<OverviewResponse>('/overview').then(setData);
+    apiFetch<OverviewResponse>('/overview')
+      .then(setData)
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'Unable to load overview.'));
   }, []);
 
   return (
     <>
       <PageHeader title="Platform Overview" />
+
+      {error && <div className="mt-3 text-sm font-medium text-danger">{error}</div>}
 
       <div className="mt-[22px] grid grid-cols-4 gap-[18px]">
         <StatCard icon={Clock} tone="warning" value={data?.counts.pending ?? 0} label="Pending Review" />

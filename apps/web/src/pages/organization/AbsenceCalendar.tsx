@@ -41,6 +41,7 @@ export default function AbsenceCalendar() {
   const [overCapDays, setOverCapDays] = React.useState<OverCapDayDto[]>([]);
   const [overCapError, setOverCapError] = React.useState<string | null>(null);
   const [cap, setCap] = React.useState<number | null>(null);
+  const [bootstrapError, setBootstrapError] = React.useState<string | null>(null);
   const [selectedDay, setSelectedDay] = React.useState<{ dateIso: string; rows: AbsenceEntryDto[] } | null>(null);
 
   const grid = React.useMemo(() => getMonthGrid(month), [month]);
@@ -48,13 +49,15 @@ export default function AbsenceCalendar() {
     (user?.roles.includes(SystemRoleKey.EnterpriseAdmin) ?? false) || (user?.roles.includes(SystemRoleKey.HrHead) ?? false);
 
   React.useEffect(() => {
-    apiFetch<DepartmentsResponse>('/departments?pageSize=100').then((res) =>
-      setDepartments(res.rows.map((d) => ({ id: d.id, name: d.name }))),
-    );
-    apiFetch<ProjectsResponse>('/projects?pageSize=100').then((res) =>
-      setProjects(res.rows.map((p) => ({ id: p.id, name: p.name }))),
-    );
-    getAbsenceCap().then((res) => setCap(res.cap));
+    const onFail = (err: unknown) =>
+      setBootstrapError(err instanceof ApiError ? err.message : 'Unable to load filter options.');
+    apiFetch<DepartmentsResponse>('/departments?pageSize=100')
+      .then((res) => setDepartments(res.rows.map((d) => ({ id: d.id, name: d.name }))))
+      .catch(onFail);
+    apiFetch<ProjectsResponse>('/projects?pageSize=100')
+      .then((res) => setProjects(res.rows.map((p) => ({ id: p.id, name: p.name }))))
+      .catch(onFail);
+    getAbsenceCap().then((res) => setCap(res.cap)).catch(onFail);
   }, []);
 
   const load = React.useCallback(() => {
@@ -124,6 +127,8 @@ export default function AbsenceCalendar() {
         view={view}
         onViewChange={setView}
       />
+
+      {bootstrapError && <div className="mt-2 text-[12.5px] text-danger">{bootstrapError}</div>}
 
       <div className="mt-[18px] flex items-start gap-[18px]">
         <div className="min-w-0 flex-1">

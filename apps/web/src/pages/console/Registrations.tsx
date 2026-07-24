@@ -66,6 +66,7 @@ export default function Registrations() {
   const [rows, setRows] = React.useState<EnterpriseRegistrationDto[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [reviewing, setReviewing] = React.useState<EnterpriseRegistrationDto | null>(null);
   const [rejecting, setRejecting] = React.useState<EnterpriseRegistrationDto | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
@@ -84,6 +85,7 @@ export default function Registrations() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (debouncedSearch) params.set('search', debouncedSearch);
@@ -92,6 +94,8 @@ export default function Registrations() {
       const res = await apiFetch<RegistrationsResponse>(`/registrations?${params.toString()}`);
       setRows(res.rows);
       setTotal(res.total);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Unable to load registrations.');
     } finally {
       setLoading(false);
     }
@@ -260,7 +264,10 @@ export default function Registrations() {
             </div>
           </div>
         ))}
-        {!loading && rows.length === 0 && (
+        {!loading && loadError && (
+          <div className="px-4 py-12 text-center text-sm text-danger">{loadError}</div>
+        )}
+        {!loading && !loadError && rows.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-400">
             No registrations in this view.
           </div>

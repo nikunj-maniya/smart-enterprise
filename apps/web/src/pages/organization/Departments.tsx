@@ -230,6 +230,7 @@ export default function Departments() {
   const [deleting, setDeleting] = React.useState<DepartmentDto | null>(null);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const { highlightId, rowRef } = useHighlightRow();
 
   React.useEffect(() => {
@@ -243,12 +244,15 @@ export default function Departments() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (debouncedSearch) params.set('search', debouncedSearch);
       const res = await apiFetch<DepartmentsResponse>(`/departments?${params.toString()}`);
       setRows(res.rows);
       setTotal(res.total);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Unable to load departments.');
     } finally {
       setLoading(false);
     }
@@ -319,7 +323,11 @@ export default function Departments() {
         </div>
       </div>
 
-      {!loading && rows.length === 0 ? (
+      {loadError ? (
+        <div className="mt-[18px] rounded-[14px] border border-dashed border-line bg-surface p-12 text-center text-sm text-danger">
+          {loadError}
+        </div>
+      ) : !loading && rows.length === 0 ? (
         <div className="mt-[18px] rounded-[14px] border border-dashed border-line bg-surface p-12 text-center text-sm text-ink-400">
           No departments match your search.
         </div>

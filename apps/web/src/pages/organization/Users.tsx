@@ -36,6 +36,7 @@ import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
+import { ErrorState } from '@/pages/requests/shared';
 
 const GRID = 'grid-cols-[2fr_1.3fr_1.3fr_1fr_1fr]';
 
@@ -594,17 +595,22 @@ export default function OrgUsers() {
   const [removing, setRemoving] = React.useState<OrgUserDto | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [resetResult, setResetResult] = React.useState<{ user: OrgUserDto; password: string } | null>(
     null,
   );
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
-    // archived=false: retired roles/departments aren't offered for new assignments.
-    apiFetch<RolesResponse>('/roles?pageSize=100&archived=false').then((r) => setRoles(r.rows));
-    apiFetch<DepartmentsResponse>('/departments?pageSize=100&archived=false').then((r) =>
-      setDepartments(r.rows),
-    );
+    // archived=false: retired roles/departments aren't offered for new assignments. Failures here
+    // just leave the filter/assignment options empty — the main list load below surfaces the
+    // visible error state.
+    apiFetch<RolesResponse>('/roles?pageSize=100&archived=false')
+      .then((r) => setRoles(r.rows))
+      .catch(() => {});
+    apiFetch<DepartmentsResponse>('/departments?pageSize=100&archived=false')
+      .then((r) => setDepartments(r.rows))
+      .catch(() => {});
   }, []);
 
   React.useEffect(() => {
@@ -614,6 +620,7 @@ export default function OrgUsers() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (debouncedSearch) params.set('search', debouncedSearch);
@@ -626,6 +633,8 @@ export default function OrgUsers() {
       setRows(res.rows);
       setTotal(res.total);
       setStats(statsRes);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Unable to load users.');
     } finally {
       setLoading(false);
     }
@@ -822,7 +831,13 @@ export default function OrgUsers() {
           <span>Status</span>
           <span className="text-right">Actions</span>
         </div>
-        {rows.map((u) => (
+        {loadError && (
+          <div className="px-4 py-8">
+            <ErrorState message={loadError} onRetry={load} />
+          </div>
+        )}
+        {!loadError &&
+          rows.map((u) => (
           <div
             key={u.id}
             ref={u.id === highlightId ? rowRef : undefined}
@@ -949,12 +964,14 @@ export default function OrgUsers() {
             </div>
           </div>
         ))}
-        {!loading && rows.length === 0 && (
+        {!loadError && !loading && rows.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-400">
             No users match your search.
           </div>
         )}
-        {loading && <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>}
+        {!loadError && loading && (
+          <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>
+        )}
       </div>
 
       {total > pageSize && (

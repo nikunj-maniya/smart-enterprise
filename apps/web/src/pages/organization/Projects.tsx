@@ -15,6 +15,7 @@ import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
+import { ErrorState } from '@/pages/requests/shared';
 
 type StatusFilter = '' | 'active' | 'archived';
 
@@ -323,7 +324,13 @@ export default function Projects() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data: projectsData, isFetching: loading } = useQuery({
+  const {
+    data: projectsData,
+    isFetching: loading,
+    isError,
+    error: projectsError,
+    refetch: refetchProjects,
+  } = useQuery({
     queryKey: ['projects', { page, pageSize, search: debouncedSearch, status }],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
@@ -335,6 +342,7 @@ export default function Projects() {
   });
   const rows = projectsData?.rows ?? [];
   const total = projectsData?.total ?? 0;
+  const loadErrorMessage = projectsError instanceof ApiError ? projectsError.message : 'Unable to load projects.';
 
   function invalidateProjects() {
     queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -446,7 +454,13 @@ export default function Projects() {
           <span>Status</span>
           <span className="text-right">Actions</span>
         </div>
-        {rows.map((p) => (
+        {isError && (
+          <div className="px-4 py-8">
+            <ErrorState message={loadErrorMessage} onRetry={() => refetchProjects()} />
+          </div>
+        )}
+        {!isError &&
+          rows.map((p) => (
           <div
             key={p.id}
             ref={p.id === highlightId ? rowRef : undefined}
@@ -482,12 +496,14 @@ export default function Projects() {
             </div>
           </div>
         ))}
-        {!loading && rows.length === 0 && (
+        {!isError && !loading && rows.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-400">
             No projects match your search.
           </div>
         )}
-        {loading && <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>}
+        {!isError && loading && (
+          <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>
+        )}
       </div>
 
       {total > pageSize && (

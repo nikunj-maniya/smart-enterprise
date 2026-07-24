@@ -115,6 +115,7 @@ export default function Profile() {
   const { refresh } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = React.useState<ProfileDto | null>(null);
+  const [profileError, setProfileError] = React.useState<string | null>(null);
   const [name, setName] = React.useState('');
   const [phone, setPhone] = React.useState('');
   const [jobTitle, setJobTitle] = React.useState('');
@@ -136,13 +137,15 @@ export default function Profile() {
   const { changePassword } = useAuth();
 
   React.useEffect(() => {
-    apiFetch<ProfileDto>('/profile').then((p) => {
-      setProfile(p);
-      setName(p.name);
-      setPhone(p.phone ?? '');
-      setJobTitle(p.jobTitle ?? '');
-      setLocation(p.location ?? '');
-    });
+    apiFetch<ProfileDto>('/profile')
+      .then((p) => {
+        setProfile(p);
+        setName(p.name);
+        setPhone(p.phone ?? '');
+        setJobTitle(p.jobTitle ?? '');
+        setLocation(p.location ?? '');
+      })
+      .catch((err) => setProfileError(err instanceof ApiError ? err.message : 'Unable to load your profile.'));
     getNotificationPreferences()
       .then((res) => setPrefs(res.rows))
       .catch((err) => setPrefsError(err instanceof ApiError ? err.message : 'Unable to load notification preferences.'));
@@ -211,7 +214,11 @@ export default function Profile() {
     return (
       <>
         <PageHeader title="My Profile" breadcrumb="Account" />
-        <div className="mt-6 text-sm text-ink-400">Loading…</div>
+        {profileError ? (
+          <div className="mt-6 text-sm font-medium text-danger">{profileError}</div>
+        ) : (
+          <div className="mt-6 text-sm text-ink-400">Loading…</div>
+        )}
       </>
     );
   }

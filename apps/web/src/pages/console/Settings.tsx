@@ -59,9 +59,12 @@ export default function Settings() {
   React.useEffect(() => {
     (async () => {
       setLoading(true);
+      setError(null);
       try {
         const res = await apiFetch<PlatformSettings>('/settings');
         setSettings(res);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Unable to load settings.');
       } finally {
         setLoading(false);
       }
