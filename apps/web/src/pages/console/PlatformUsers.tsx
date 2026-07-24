@@ -57,6 +57,7 @@ export default function PlatformUsers() {
   const [rows, setRows] = React.useState<PlatformUserDto[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
   const [search, setSearch] = React.useState('');
@@ -65,6 +66,7 @@ export default function PlatformUsers() {
   const [tenantId, setTenantId] = React.useState('');
   const { highlightId, rowRef } = useHighlightRow();
   const [enterprises, setEnterprises] = React.useState<EnterpriseDto[]>([]);
+  const [enterprisesError, setEnterprisesError] = React.useState<string | null>(null);
   const [resetting, setResetting] = React.useState<PlatformUserDto | null>(null);
   const [resetResult, setResetResult] = React.useState<{
     user: PlatformUserDto;
@@ -75,9 +77,11 @@ export default function PlatformUsers() {
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
-    apiFetch<EnterprisesResponse>('/enterprises?pageSize=200').then((res) =>
-      setEnterprises(res.rows),
-    );
+    apiFetch<EnterprisesResponse>('/enterprises?pageSize=200')
+      .then((res) => setEnterprises(res.rows))
+      .catch((err) =>
+        setEnterprisesError(err instanceof ApiError ? err.message : 'Unable to load enterprises.'),
+      );
   }, []);
 
   React.useEffect(() => {
@@ -92,10 +96,14 @@ export default function PlatformUsers() {
     if (tenantId) params.set('tenantId', tenantId);
 
     setLoading(true);
+    setLoadError(null);
     apiFetch<PlatformUsersResponse>(`/users?${params.toString()}`)
       .then((res) => {
         setRows(res.rows);
         setTotal(res.total);
+      })
+      .catch((err) => {
+        setLoadError(err instanceof ApiError ? err.message : 'Unable to load users.');
       })
       .finally(() => setLoading(false));
   }, [page, pageSize, debouncedSearch, status, tenantId]);
@@ -175,6 +183,7 @@ export default function PlatformUsers() {
           </select>
           <ChevronDown size={18} className="pointer-events-none absolute right-3 text-ink-400" />
         </div>
+        {enterprisesError && <span className="text-xs text-danger">{enterprisesError}</span>}
         <div className="relative flex items-center">
           <select
             value={status}
@@ -242,7 +251,10 @@ export default function PlatformUsers() {
             </div>
           </div>
         ))}
-        {!loading && rows.length === 0 && (
+        {!loading && loadError && (
+          <div className="px-4 py-12 text-center text-sm text-danger">{loadError}</div>
+        )}
+        {!loading && !loadError && rows.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-400">
             No users match your filters.
           </div>

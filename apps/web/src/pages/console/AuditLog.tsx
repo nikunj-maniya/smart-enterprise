@@ -12,7 +12,7 @@ import type { LucideIcon } from 'lucide-react';
 import { AuditAction, type AuditLogEntry, type AuditLogResponse } from '@se/shared';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/formatRelativeTime';
 
 const ACTIVITY_STYLE: Record<string, { label: string; icon: LucideIcon }> = {
@@ -37,6 +37,7 @@ export default function AuditLog() {
   const [rows, setRows] = React.useState<AuditLogEntry[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
   const [search, setSearch] = React.useState('');
@@ -55,10 +56,14 @@ export default function AuditLog() {
     if (action) params.set('action', action);
 
     setLoading(true);
+    setLoadError(null);
     apiFetch<AuditLogResponse>(`/audit-log?${params.toString()}`)
       .then((res) => {
         setRows(res.rows);
         setTotal(res.total);
+      })
+      .catch((err) => {
+        setLoadError(err instanceof ApiError ? err.message : 'Unable to load audit log.');
       })
       .finally(() => setLoading(false));
   }, [page, pageSize, debouncedSearch, action]);
@@ -178,7 +183,10 @@ export default function AuditLog() {
             </div>
           );
         })}
-        {!loading && rows.length === 0 && (
+        {!loading && loadError && (
+          <div className="px-4 py-12 text-center text-sm text-danger">{loadError}</div>
+        )}
+        {!loading && !loadError && rows.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-400">
             No audit entries match your filters.
           </div>

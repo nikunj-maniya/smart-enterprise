@@ -104,6 +104,7 @@ export default function FormBuilder() {
   const { user } = useAuth();
   const [forms, setForms] = React.useState<FormBuilderListItemDto[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [detail, setDetail] = React.useState<FormDefinitionDto | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
@@ -128,10 +129,13 @@ export default function FormBuilder() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const rows = await apiFetch<FormBuilderListItemDto[]>('/forms/drafts');
       setForms(rows);
       setSelectedKey((current) => current ?? rows[0]?.key ?? null);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Unable to load forms.');
     } finally {
       setLoading(false);
     }
@@ -365,6 +369,8 @@ export default function FormBuilder() {
           </div>
           {loading ? (
             <div className="px-5 py-12 text-center text-sm text-ink-400">Loading…</div>
+          ) : loadError ? (
+            <div className="px-5 py-12 text-center text-sm text-danger">{loadError}</div>
           ) : forms.length === 0 ? (
             <div className="px-5 py-12 text-center text-sm text-ink-400">
               No forms yet. Create one to get started.

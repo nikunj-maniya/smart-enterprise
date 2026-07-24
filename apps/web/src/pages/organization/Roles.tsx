@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { ErrorState } from '@/pages/requests/shared';
 
 type TypeFilter = '' | 'system' | 'custom';
 
@@ -194,6 +195,7 @@ export default function Roles() {
   const [rows, setRows] = React.useState<RoleDto[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [search, setSearch] = React.useState('');
@@ -212,6 +214,7 @@ export default function Roles() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (debouncedSearch) params.set('search', debouncedSearch);
@@ -219,6 +222,8 @@ export default function Roles() {
       const res = await apiFetch<RolesResponse>(`/roles?${params.toString()}`);
       setRows(res.rows);
       setTotal(res.total);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Unable to load roles.');
     } finally {
       setLoading(false);
     }
@@ -324,7 +329,13 @@ export default function Roles() {
           <span>Type</span>
           <span className="text-right">Actions</span>
         </div>
-        {rows.map((role) => (
+        {error && (
+          <div className="px-4 py-8">
+            <ErrorState message={error} onRetry={load} />
+          </div>
+        )}
+        {!error &&
+          rows.map((role) => (
           <div
             key={role.id}
             className={`grid ${GRID} min-w-[760px] items-center border-b border-line-soft px-[22px] py-[15px] last:border-b-0`}
@@ -373,12 +384,12 @@ export default function Roles() {
             </div>
           </div>
         ))}
-        {!loading && rows.length === 0 && (
+        {!error && !loading && rows.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-400">
             No roles match your search.
           </div>
         )}
-        {loading && <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>}
+        {!error && loading && <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>}
       </div>
 
       {total > pageSize && (

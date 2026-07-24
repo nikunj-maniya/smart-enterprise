@@ -4,7 +4,7 @@ import { EnterpriseStatus, type EnterpriseDto, type EnterprisesResponse } from '
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Overlay } from '@/components/ui/overlay';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { highlightRingClass, useHighlightRow } from '@/lib/useHighlightRow';
 
 const GRID_COLS = 'grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1.3fr]';
@@ -40,6 +40,7 @@ export default function Enterprises() {
   const [rows, setRows] = React.useState<EnterpriseDto[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [confirming, setConfirming] = React.useState<EnterpriseDto | null>(null);
   const [page, setPage] = React.useState(1);
@@ -56,6 +57,7 @@ export default function Enterprises() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (debouncedSearch) params.set('search', debouncedSearch);
@@ -64,6 +66,8 @@ export default function Enterprises() {
       const res = await apiFetch<EnterprisesResponse>(`/enterprises?${params.toString()}`);
       setRows(res.rows);
       setTotal(res.total);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Unable to load enterprises.');
     } finally {
       setLoading(false);
     }
@@ -197,7 +201,10 @@ export default function Enterprises() {
             </div>
           </div>
         ))}
-        {!loading && rows.length === 0 && (
+        {!loading && loadError && (
+          <div className="px-4 py-12 text-center text-sm text-danger">{loadError}</div>
+        )}
+        {!loading && !loadError && rows.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-400">No enterprises yet.</div>
         )}
         {loading && <div className="px-4 py-12 text-center text-sm text-ink-400">Loading…</div>}

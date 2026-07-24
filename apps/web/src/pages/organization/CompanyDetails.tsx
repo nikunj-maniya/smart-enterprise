@@ -97,15 +97,18 @@ export default function CompanyDetails() {
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [saved, setSaved] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    apiFetch<EnterpriseDetailsDto>('/enterprise-profile').then((d) => {
-      setDetails(d);
-      setName(d.name);
-      setIndustry(d.industry ?? '');
-      setSize(d.size ?? '');
-      setWebsite(d.website ?? '');
-    });
+    apiFetch<EnterpriseDetailsDto>('/enterprise-profile')
+      .then((d) => {
+        setDetails(d);
+        setName(d.name);
+        setIndustry(d.industry ?? '');
+        setSize(d.size ?? '');
+        setWebsite(d.website ?? '');
+      })
+      .catch((err) => setLoadError(err instanceof ApiError ? err.message : 'Unable to load company details.'));
   }, []);
 
   async function onSave() {
@@ -140,7 +143,9 @@ export default function CompanyDetails() {
           title="Company Details"
           breadcrumb={`Organization · ${user?.tenantName ?? ''}`}
         />
-        <div className="mt-6 text-sm text-ink-400">Loading…</div>
+        <div className={`mt-6 text-sm ${loadError ? 'font-medium text-danger' : 'text-ink-400'}`}>
+          {loadError ?? 'Loading…'}
+        </div>
       </>
     );
   }
