@@ -2,6 +2,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@/lib/auth';
 import Projects from './Projects';
 
@@ -18,6 +19,7 @@ let pmOptionsBody: unknown[] = [];
 let tlOptionsBody: unknown[] = [];
 let deleteStatus = 200;
 const realFetch = globalThis.fetch;
+let queryClient: QueryClient;
 
 beforeEach(() => {
   requests = [];
@@ -53,15 +55,21 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
   cleanup();
+  // Default gcTime (5min) leaves a pending timer per query, which keeps node:test's
+  // process alive past its own run — clear() destroys queries and their gc timers.
+  queryClient.clear();
 });
 
 function renderPage() {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
-    <AuthProvider>
-      <MemoryRouter>
-        <Projects />
-      </MemoryRouter>
-    </AuthProvider>,
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <MemoryRouter>
+          <Projects />
+        </MemoryRouter>
+      </AuthProvider>
+    </QueryClientProvider>,
   );
 }
 

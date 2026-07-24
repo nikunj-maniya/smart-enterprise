@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Search, ChevronDown, Plus, PencilLine, Check, Trash2 } from 'lucide-react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SystemRoleKey,
   type CreateProjectRequest,
@@ -287,17 +288,12 @@ function ProjectModal({
 
 export default function Projects() {
   const { user } = useAuth();
-  const [rows, setRows] = React.useState<ProjectDto[]>([]);
-  const [total, setTotal] = React.useState(0);
-  const [loading, setLoading] = React.useState(true);
+  const queryClient = useQueryClient();
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [search, setSearch] = React.useState('');
   const [debouncedSearch, setDebouncedSearch] = React.useState('');
   const [status, setStatus] = React.useState<StatusFilter>('');
-  const [allUsers, setAllUsers] = React.useState<OrgUserPickerDto[]>([]);
-  const [pmOptions, setPmOptions] = React.useState<OrgUserPickerDto[]>([]);
-  const [tlOptions, setTlOptions] = React.useState<OrgUserPickerDto[]>([]);
   const [editing, setEditing] = React.useState<ProjectDto | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [statusBusyId, setStatusBusyId] = React.useState<string | null>(null);
@@ -306,39 +302,43 @@ export default function Projects() {
   const { highlightId, rowRef } = useHighlightRow();
   const [deleteBusy, setDeleteBusy] = React.useState(false);
 
-  React.useEffect(() => {
-    // Members can be anyone; PM/Tech Lead are limited to holders of the matching system role.
-    apiFetch<OrgUserPickerDto[]>('/org-users/options').then(setAllUsers);
-    apiFetch<OrgUserPickerDto[]>(`/org-users/options?role=${SystemRoleKey.ProjectManager}`).then(
-      setPmOptions,
-    );
-    apiFetch<OrgUserPickerDto[]>(`/org-users/options?role=${SystemRoleKey.TechLead}`).then(
-      setTlOptions,
-    );
-  }, []);
+  // Members can be anyone; PM/Tech Lead are limited to holders of the matching system role.
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ['org-users-options'],
+    queryFn: () => apiFetch<OrgUserPickerDto[]>('/org-users/options'),
+  });
+  const { data: pmOptions = [] } = useQuery({
+    queryKey: ['org-users-options', 'pm'],
+    queryFn: () =>
+      apiFetch<OrgUserPickerDto[]>(`/org-users/options?role=${SystemRoleKey.ProjectManager}`),
+  });
+  const { data: tlOptions = [] } = useQuery({
+    queryKey: ['org-users-options', 'tl'],
+    queryFn: () =>
+      apiFetch<OrgUserPickerDto[]>(`/org-users/options?role=${SystemRoleKey.TechLead}`),
+  });
 
   React.useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
+  const { data: projectsData, isFetching: loading } = useQuery({
+    queryKey: ['projects', { page, pageSize, search: debouncedSearch, status }],
+    queryFn: () => {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (debouncedSearch) params.set('search', debouncedSearch);
       if (status) params.set('status', status);
-      const res = await apiFetch<ProjectsResponse>(`/projects?${params.toString()}`);
-      setRows(res.rows);
-      setTotal(res.total);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, pageSize, debouncedSearch, status]);
+      return apiFetch<ProjectsResponse>(`/projects?${params.toString()}`);
+    },
+    placeholderData: keepPreviousData,
+  });
+  const rows = projectsData?.rows ?? [];
+  const total = projectsData?.total ?? 0;
 
-  React.useEffect(() => {
-    load();
-  }, [load]);
+  function invalidateProjects() {
+    queryClient.invalidateQueries({ queryKey: ['projects'] });
+  }
 
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
@@ -347,7 +347,7 @@ export default function Projects() {
   function onSaved() {
     setEditing(null);
     setCreating(false);
-    load();
+    invalidateProjects();
   }
 
   async function onConfirmDelete() {
@@ -357,7 +357,7 @@ export default function Projects() {
     try {
       await apiFetch(`/projects/${deleting.id}`, { method: 'DELETE' });
       setDeleting(null);
-      load();
+      invalidateProjects();
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : 'Unable to delete the project.');
     } finally {
@@ -380,7 +380,7 @@ export default function Projects() {
           memberIds: p.members.map((m) => m.id),
         } satisfies CreateProjectRequest),
       });
-      load();
+      invalidateProjects();
     } finally {
       setStatusBusyId(null);
     }
