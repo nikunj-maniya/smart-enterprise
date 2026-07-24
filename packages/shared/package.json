@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "tsx --test $(find src -name '*.test.ts')"
+    "test": "tsx --test --test-timeout=30000 $(find src -name '*.test.ts')"
   },
   "dependencies": {
     "zod": "^3.24.1"

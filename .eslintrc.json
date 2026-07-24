@@ -13,6 +13,13 @@
   },
   "ignorePatterns": ["dist", "build", "node_modules", "*.config.js", "*.config.ts"],
   "rules": {
-    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }]
+    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "CallExpression[callee.object.name='assert'][callee.property.name=/^(equal|strictEqual|deepEqual|deepStrictEqual)$/] > CallExpression.arguments:first-child[callee.property.name=/^(get|query)By/]",
+        "message": "Don't pass a raw DOM element into assert.equal/strictEqual/deepEqual — on failure Node tries to format it for the diff, which can hang/OOM on Testing Library's circular DOM graph instead of failing fast. Compare a boolean instead, e.g. assert.equal(screen.queryByText('X') === null, true)."
+      }
+    ]
   }
 }

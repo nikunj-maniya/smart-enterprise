@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --import ./src/test-setup.ts $(find src -name '*.test.ts' -o -name '*.test.tsx')",
+    "test": "tsx --test --test-timeout=30000 --import ./src/test-setup.ts $(find src -name '*.test.ts' -o -name '*.test.tsx')",
     "test:e2e": "playwright test"
   },
   "dependencies": {
