@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --test-timeout=30000 --import ./src/test-setup.ts $(find src -name '*.test.ts' -o -name '*.test.tsx')",
+    "test:coverage": "node --experimental-test-coverage --import tsx --test --test-timeout=30000 --import ./src/test-setup.ts $(find src -name '*.test.ts' -o -name '*.test.tsx')",
     "test:e2e": "playwright test"
   },
   "dependencies": {
