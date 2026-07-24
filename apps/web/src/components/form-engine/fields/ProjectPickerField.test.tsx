@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { DirectoryProjectDto, FormField } from '@se/shared';
 import { ProjectPickerField } from './ProjectPickerField';
 
@@ -84,8 +84,13 @@ test('ProjectPickerField debounces the search request as the user types', async 
   await screen.findByText('Alpha Migration');
 
   fireEvent.change(screen.getByPlaceholderText('Search projects'), { target: { value: 'Alp' } });
+  // Wait for the debounced 'Alp' search to actually apply (Beta Rollout drops out of the
+  // filtered results) before asserting — checking immediately races the 300ms debounce timer.
+  // Comparing to a boolean rather than asserting on the raw element directly: a failed
+  // assert.equal/deepEqual on a live DOM node makes Node try to format it for the diff, which
+  // can hang/OOM on jsdom's circular element graph instead of failing fast.
+  await waitFor(() => assert.equal(screen.queryByText('Beta Rollout') === null, true));
   assert.ok(await screen.findByText('Alpha Migration'));
-  assert.equal(screen.queryByText('Beta Rollout'), null);
 
   const searchRequests = requests.filter((r) => r.search === 'Alp');
   assert.ok(searchRequests.length > 0, 'expected a request for the "Alp" search term');
@@ -94,13 +99,16 @@ test('ProjectPickerField debounces the search request as the user types', async 
 test('ProjectPickerField single-select mode fills the input with the chosen project and closes the dropdown', async () => {
   rowsForSearch = () => [alpha, beta];
   let lastValue: unknown;
-  render(<ProjectPickerField field={field} value={undefined} onChange={(v) => (lastValue = v)} />);
+  const { rerender } = render(<ProjectPickerField field={field} value={undefined} onChange={(v) => (lastValue = v)} />);
 
   fireEvent.focus(screen.getByPlaceholderText('Search projects'));
   fireEvent.click(await screen.findByText('Alpha Migration'));
 
   assert.equal(lastValue, 'proj-1');
-  assert.equal(screen.queryByText('Beta Rollout'), null);
+  // singleSelected is derived from the `value` prop, so the input only shows the chosen
+  // project's name once the component is re-rendered with it, like a real controlled parent would.
+  rerender(<ProjectPickerField field={field} value={lastValue} onChange={(v) => (lastValue = v)} />);
+  assert.equal(screen.queryByText('Beta Rollout') === null, true);
   assert.ok(screen.getByDisplayValue('Alpha Migration'));
 });
 
@@ -108,7 +116,7 @@ test('ProjectPickerField multi-select mode accumulates chips and re-clicking a s
   rowsForSearch = () => [alpha, beta];
   const multiField: FormField = { ...field, options: { multi: true } };
   let lastValue: unknown;
-  render(<ProjectPickerField field={multiField} value={[]} onChange={(v) => (lastValue = v)} />);
+  const { rerender } = render(<ProjectPickerField field={multiField} value={[]} onChange={(v) => (lastValue = v)} />);
 
   fireEvent.focus(screen.getByPlaceholderText('Search projects'));
   fireEvent.click(await screen.findByText('Alpha Migration'));
@@ -116,8 +124,13 @@ test('ProjectPickerField multi-select mode accumulates chips and re-clicking a s
   // Dropdown stays open in multi mode.
   assert.ok(screen.getByText('Beta Rollout'));
 
+  // select() derives selectedIds from the `value` prop, so the no-op check only holds if the
+  // component is re-rendered with the updated value first, like a real controlled parent would.
+  rerender(<ProjectPickerField field={multiField} value={lastValue as string[]} onChange={(v) => (lastValue = v)} />);
+
+  // Both the result row and the now-rendered chip show "Alpha Migration" — scope to the row button.
   lastValue = undefined;
-  fireEvent.click(screen.getByText('Alpha Migration'));
+  fireEvent.click(screen.getByRole('button', { name: 'Alpha Migration' }));
   assert.equal(lastValue, undefined, 'clicking an already-selected project should not call onChange again');
 });
 
