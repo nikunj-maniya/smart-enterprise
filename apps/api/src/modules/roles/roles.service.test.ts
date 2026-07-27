@@ -26,6 +26,8 @@ let roleRows: RoleRow[] = [];
 let roleCount = 0;
 let findUniqueRole: RoleRow | null = null;
 let findFirstClash: RoleRow | null = null;
+let escalationRuleRow: { fromContext: string } | null = null;
+let formFieldRows: Array<{ label: string; options: unknown; section: { form: { title: string } } }> = [];
 
 const calls = {
   findMany: [] as unknown[],
@@ -72,6 +74,14 @@ Object.defineProperty(prisma, 'role', {
   },
   configurable: true,
 });
+Object.defineProperty(prisma, 'escalationRule', {
+  value: { findFirst: async () => escalationRuleRow },
+  configurable: true,
+});
+Object.defineProperty(prisma, 'formField', {
+  value: { findMany: async () => formFieldRows },
+  configurable: true,
+});
 Object.defineProperty(prisma, 'auditLog', {
   value: {
     create: async (args: unknown) => {
@@ -91,6 +101,8 @@ function resetAll() {
   roleCount = 0;
   findUniqueRole = null;
   findFirstClash = null;
+  escalationRuleRow = null;
+  formFieldRows = [];
   for (const key of Object.keys(calls) as (keyof typeof calls)[]) calls[key].length = 0;
 }
 
@@ -311,6 +323,30 @@ describe('deleteRole', () => {
       assert.match((err as Error).message, /assigned to 3 members\. Reassign/);
       return true;
     });
+  });
+
+  it('throws 409 when the role is an escalation-matrix target', async () => {
+    findUniqueRole = role({ isSystem: false, _count: { users: 0 } });
+    escalationRuleRow = { fromContext: 'tech-lead' };
+    await assert.rejects(() => deleteRole('t1', 'r1', 'actor1'), (err: unknown) => {
+      assert.equal((err as { status: number }).status, 409);
+      assert.match((err as Error).message, /escalation target for "tech-lead"/);
+      return true;
+    });
+    assert.equal(calls.delete.length, 0);
+  });
+
+  it('throws 409 when a form field\'s roles filter still references the role', async () => {
+    findUniqueRole = role({ isSystem: false, key: 'process-head', _count: { users: 0 } });
+    formFieldRows = [
+      { label: 'Process Head', options: { roles: ['process-head'] }, section: { form: { title: 'IT Change Request' } } },
+    ];
+    await assert.rejects(() => deleteRole('t1', 'r1', 'actor1'), (err: unknown) => {
+      assert.equal((err as { status: number }).status, 409);
+      assert.match((err as Error).message, /"Process Head" field on the IT Change Request form/);
+      return true;
+    });
+    assert.equal(calls.delete.length, 0);
   });
 
   it('deletes an unassigned custom role and audits the removal', async () => {

@@ -16,7 +16,7 @@ import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 import * as formsService from '../forms/forms.service.js';
 import * as notificationsService from '../notifications/notifications.service.js';
-import { resolveApprovers } from './approver-resolution.js';
+import { assertApproversEligible, resolveApprovers } from './approver-resolution.js';
 import { applySelfApprovalEscalation } from './escalation.service.js';
 import { extractPromotedColumns } from './extractors.js';
 import {
@@ -55,6 +55,7 @@ export async function createRequest(
   const promoted = extractPromotedColumns(input.formKey, result.data!);
   const stageRules = form.approvalWorkflow ? stageRulesSchema.parse(form.approvalWorkflow.stageRules) : null;
   const resolvedApprovers = resolveApprovers(form.definition, stageRules, result.data!);
+  await assertApproversEligible(tenantId, form.definition, resolvedApprovers, result.data!);
   const requester = await prisma.user.findUniqueOrThrow({ where: { id: requesterId }, select: { name: true } });
 
   // Leave/WFH-only computed flags (leave-wfh-requests) — pure reads, done ahead of the
@@ -156,7 +157,10 @@ export async function getRequestById(
   const approverIds = [
     ...new Set(request.approvers.flatMap((a) => [a.approverId, a.escalatedFromId].filter((v): v is string => !!v))),
   ];
-  const approverUsers = await prisma.user.findMany({ where: { id: { in: approverIds } }, select: { id: true, name: true } });
+  const approverUsers = await prisma.user.findMany({
+    where: { id: { in: approverIds }, tenantId },
+    select: { id: true, name: true },
+  });
   const nameById = new Map(approverUsers.map((u) => [u.id, u.name]));
 
   return {
@@ -284,7 +288,7 @@ export async function listApprovalQueue(
     }
   }
   const approverUsers = await prisma.user.findMany({
-    where: { id: { in: [...chainApproverIds] } },
+    where: { id: { in: [...chainApproverIds] }, tenantId },
     select: { id: true, name: true },
   });
   const nameByApproverId = new Map(approverUsers.map((u) => [u.id, u.name]));

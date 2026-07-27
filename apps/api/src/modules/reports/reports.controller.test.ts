@@ -34,6 +34,15 @@ describe('reports controller guards', () => {
     assert.equal(err.name, 'ZodError');
   });
 
+  it('exportCsv rejects a malformed "from"/"to" (Zod error) — guards the CSV filename header against injection', async () => {
+    const err = await invoke(reportsController.exportCsv, {
+      query: { from: '2026-06-01"; evil', to: '2026-06-30' },
+      user: VIEWER,
+    });
+    assert.ok(err instanceof Error);
+    assert.equal(err.name, 'ZodError');
+  });
+
   it('attendance rejects a malformed month (Zod error)', async () => {
     const err = await invoke(reportsController.attendance, { query: { month: '2026-6' }, user: VIEWER });
     assert.ok(err instanceof Error);

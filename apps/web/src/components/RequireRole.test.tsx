@@ -49,8 +49,6 @@ const baseUser: AuthUser = {
 };
 
 function stubMe(user: AuthUser) {
-  localStorage.setItem('se.accessToken', 'test-token');
-  localStorage.setItem('se.refreshToken', 'test-refresh');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: user });
 }
 
@@ -69,6 +67,29 @@ function renderGuarded(role: string | string[]) {
             element={
               <ProtectedRoute>
                 <RequireRole role={role}>
+                  <div>Gated content</div>
+                </RequireRole>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>,
+  );
+}
+
+function renderSystemAdminGuarded() {
+  return render(
+    <AuthProvider>
+      <MemoryRouter initialEntries={['/gated']}>
+        <Routes>
+          <Route path="/login" element={<div>Login screen</div>} />
+          <Route path="/" element={<div>Home screen</div>} />
+          <Route
+            path="/gated"
+            element={
+              <ProtectedRoute>
+                <RequireRole systemAdmin>
                   <div>Gated content</div>
                 </RequireRole>
               </ProtectedRoute>
@@ -106,7 +127,20 @@ test('redirects to / when the user holds none of the roles in a list', async () 
   assert.equal(screen.queryByText('Gated content'), null);
 });
 
-test('redirects to /login (via ProtectedRoute) when there is no authenticated user at all', () => {
+test('redirects to /login (via ProtectedRoute) when there is no authenticated user at all', async () => {
   renderGuarded(SystemRoleKey.Finance);
-  assert.ok(screen.getByText('Login screen'));
+  assert.ok(await screen.findByText('Login screen'));
+});
+
+test('systemAdmin: renders children for a System Admin user', async () => {
+  stubMe({ ...baseUser, isSystemAdmin: true, tenantId: null, tenantName: null, roles: [] });
+  renderSystemAdminGuarded();
+  assert.ok(await screen.findByText('Gated content'));
+});
+
+test('systemAdmin: redirects to / for a regular tenant user, even one holding every tenant role', async () => {
+  stubMe({ ...baseUser, isSystemAdmin: false, roles: [SystemRoleKey.EnterpriseAdmin] });
+  renderSystemAdminGuarded();
+  assert.ok(await screen.findByText('Home screen'));
+  assert.equal(screen.queryByText('Gated content'), null);
 });

@@ -3,6 +3,7 @@ import { SystemRoleKey } from '@se/shared';
 import { verifyAccessToken } from '../lib/jwt.js';
 import { resolveAuthedUser } from '../lib/auth-cache.js';
 import { HttpError } from '../lib/http-error.js';
+import { getAccessTokenCookie } from '../lib/auth-cookies.js';
 
 export interface AuthedUser {
   id: string;
@@ -21,14 +22,16 @@ declare global {
   }
 }
 
-/** Require a valid access token; attaches req.user. */
+/** Require a valid access token; attaches req.user. Accepts either a Bearer header (API/e2e/
+ *  Postman-style clients) or the httpOnly `se_access` cookie (the web app, since finding #6 —
+ *  neither is required to also carry the other). */
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   try {
     const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
+    const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : getAccessTokenCookie(req);
+    if (!token) {
       throw new HttpError(401, 'Missing or invalid Authorization header');
     }
-    const token = header.slice('Bearer '.length);
     const payload = verifyAccessToken(token);
     const authedUser = await resolveAuthedUser(payload.sub);
     if (!authedUser) {

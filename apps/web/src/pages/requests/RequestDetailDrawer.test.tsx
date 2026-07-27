@@ -73,8 +73,6 @@ function loginAs(id: string) {
     id, name: 'Ada Lovelace', email: 'ada@acme.com', isSystemAdmin: false, mustChangePassword: false,
     tenantId: 't1', tenantName: 'Acme', roles: ['employee'],
   };
-  localStorage.setItem('se.accessToken', 'at-1');
-  localStorage.setItem('se.refreshToken', 'rt-1');
 }
 
 function renderDrawer(onClose = () => {}, onWithdrawn = () => {}) {

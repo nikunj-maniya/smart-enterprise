@@ -133,6 +133,7 @@ model User {
   registration      EnterpriseRegistration?
   resetTokens       PasswordResetToken[]
   departmentHeads   DepartmentHead[]
+  refreshTokenSessions RefreshTokenSession[]
 
   @@index([tenantId])
 }
@@ -145,6 +146,23 @@ model PasswordResetToken {
   tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// Server-side, revocable refresh-token session (security audit finding #5): the refresh token
+// itself is an opaque random string, never a self-contained JWT — tokenHash stores its SHA-256
+// hash so revocation (logout, password change/reset) actually takes effect immediately instead
+// of a stolen token staying valid for its whole TTL regardless.
+model RefreshTokenSession {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])

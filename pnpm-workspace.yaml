@@ -2,11 +2,13 @@ packages:
   - "apps/*"
   - "packages/*"
 
-# GHSA-3jxr-9vmj-r5cp / GHSA-8r6m-32jq-jx6q: pin transitive deps past their
-# `pnpm audit --audit-level=high` advisories (no direct upgrade path available).
+# GHSA-3jxr-9vmj-r5cp / GHSA-8r6m-32jq-jx6q / GHSA-mh99-v99m-4gvg / GHSA-r28c-9q8g-f849: pin
+# transitive deps past their `pnpm audit --audit-level=high` advisories (no direct upgrade path
+# available).
 overrides:
-  "minimatch@3>brace-expansion": "^1.1.16"
   fast-xml-parser: ">=5.10.1"
+  brace-expansion: ">=5.0.8"
+  postcss: ">=8.5.18"
 
 # pnpm v11 removed `onlyBuiltDependencies` (package.json's `pnpm` field is no longer read at all)
 # in favor of this workspace-level allow-list — same five packages' install scripts as before.
@@ -21,3 +23,13 @@ allowBuilds:
   # (pure-JS fallback; msgpackr-extract's native build is a perf-only optional extra).
   msgpackr-extract: false
   prisma: true
+
+# GHSA-qwww-vcr4-c8h2: React Router CSRF bypass — only reachable through its unstable RSC
+# (React Server Components) code path. This app is a plain client-rendered Vite SPA using only
+# the declarative-mode router API (BrowserRouter/Routes/Route) — no RSC, no server actions — so
+# the vulnerable path is never invoked. No fix currently ships for react-router-dom (frozen at
+# 7.x); the underlying fix landed only in the `react-router` package's 8.3.0, a separate,
+# larger migration (drop `react-router-dom`, import from `react-router` directly).
+auditConfig:
+  ignoreGhsas:
+    - GHSA-qwww-vcr4-c8h2

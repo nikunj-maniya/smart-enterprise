@@ -38,7 +38,7 @@ export async function getTodayView(tenantId: string): Promise<FrontDeskTodayResp
         .filter((v): v is string => typeof v === 'string'),
     ),
   ];
-  const hosts = await prisma.user.findMany({ where: { id: { in: hostIds } }, select: { id: true, name: true } });
+  const hosts = await prisma.user.findMany({ where: { id: { in: hostIds }, tenantId }, select: { id: true, name: true } });
   const hostNameById = new Map(hosts.map((h) => [h.id, h.name]));
 
   const dtos: FrontDeskVisitorDto[] = rows.map((r) => {
@@ -72,6 +72,10 @@ function decodeDataUrl(dataUrl: string): { buffer: Buffer; contentType: string }
   return { buffer: Buffer.from(match[2], 'base64'), contentType: match[1] };
 }
 
+/** Every id in this schema is a Prisma `cuid()` — reject anything else before it's interpolated
+ *  into an object-storage key (path separators, `..`, etc. would otherwise flow through verbatim). */
+const CUID_RE = /^c[a-z0-9]{20,}$/;
+
 /**
  * POST /front-desk/:requestId/check-in — captures the visitor's signature at check-in
  * (visitor-signatures spec), storing it in MinIO before driving the same `Approved -> Checked-In`
@@ -84,6 +88,7 @@ export async function checkInWithSignature(
   requestId: string,
   input: CheckInWithSignatureRequest,
 ): Promise<RequestDto> {
+  if (!CUID_RE.test(requestId)) throw new HttpError(400, 'Invalid request id');
   const { buffer, contentType } = decodeDataUrl(input.signature);
   const key = `visitor-signatures/${tenantId}/${requestId}.png`;
   await uploadObject(key, buffer, contentType);

@@ -45,22 +45,14 @@ import type {
 
 const API_URL = import.meta.env?.VITE_API_URL ?? 'http://localhost:4000';
 
-const ACCESS_KEY = 'se.accessToken';
-const REFRESH_KEY = 'se.refreshToken';
+/** Reads a single cookie value by name (security audit finding #6's CSRF double-submit — the
+ *  `se_csrf` cookie is deliberately readable by our own frontend JS; auth tokens are not). */
+function readCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
-export const tokenStore = {
-  get access() {
-    return localStorage.getItem(ACCESS_KEY);
-  },
-  set(access: string, refresh: string) {
-    localStorage.setItem(ACCESS_KEY, access);
-    localStorage.setItem(REFRESH_KEY, refresh);
-  },
-  clear() {
-    localStorage.removeItem(ACCESS_KEY);
-    localStorage.removeItem(REFRESH_KEY);
-  },
-};
+const SAFE_METHODS = new Set(['GET', 'HEAD', undefined]);
 
 export class ApiError extends Error {
   constructor(
@@ -76,10 +68,14 @@ export class ApiError extends Error {
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set('Content-Type', 'application/json');
-  const token = tokenStore.access;
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  // Auth travels via httpOnly cookies (finding #6) — `credentials: 'include'` is what makes the
+  // browser attach and accept them cross-origin (web on a different port than the API).
+  if (!SAFE_METHODS.has(options.method?.toUpperCase())) {
+    const csrfToken = readCookie('se_csrf');
+    if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+  }
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers, credentials: 'include' });
   const data = res.status === 204 ? null : await res.json().catch(() => null);
 
   if (!res.ok) {
@@ -337,10 +333,7 @@ export function getReportSummary(query: ReportRangeQuery) {
 export async function downloadAbsencesCsv(query: ReportRangeQuery): Promise<void> {
   const params = new URLSearchParams({ from: query.from, to: query.to });
   if (query.projectId) params.set('projectId', query.projectId);
-  const token = tokenStore.access;
-  const res = await fetch(`${API_URL}/reports/export?${params.toString()}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetch(`${API_URL}/reports/export?${params.toString()}`, { credentials: 'include' });
   if (!res.ok) throw new ApiError(res.status, `Export failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -409,9 +402,8 @@ export async function downloadAttendanceCsv(
   const params = new URLSearchParams({ month: query.month });
   if (query.departmentId) params.set('departmentId', query.departmentId);
   if (query.includeInactive) params.set('includeInactive', 'true');
-  const token = tokenStore.access;
   const res = await fetch(`${API_URL}/reports/attendance/export?${params.toString()}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
   });
   if (!res.ok) throw new ApiError(res.status, `Export failed (${res.status})`);
   const blob = await res.blob();

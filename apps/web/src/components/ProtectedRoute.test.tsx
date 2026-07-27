@@ -47,8 +47,6 @@ const baseUser: AuthUser = {
 };
 
 function stubMe(user: AuthUser) {
-  localStorage.setItem('se.accessToken', 'test-token');
-  localStorage.setItem('se.refreshToken', 'test-refresh');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: user });
 }
 
@@ -80,9 +78,9 @@ function renderGuarded(initialPath: string) {
   );
 }
 
-test('redirects to /login when there is no authenticated user', () => {
+test('redirects to /login when there is no authenticated user', async () => {
   renderGuarded('/protected');
-  assert.ok(screen.getByText('Login screen'));
+  assert.ok(await screen.findByText('Login screen'));
   assert.equal(screen.queryByText('Secret content'), null);
 });
 

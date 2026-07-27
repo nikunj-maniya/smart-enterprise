@@ -2,7 +2,6 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   apiFetch,
-  tokenStore,
   ApiError,
   searchDirectoryUsers,
   searchDirectoryProjects,
@@ -62,6 +61,7 @@ interface Recorded {
   path: string;
   body?: unknown;
   headers: Record<string, string>;
+  credentials?: RequestCredentials;
 }
 
 let stubs: Stub[] = [];
@@ -71,7 +71,7 @@ const realFetch = globalThis.fetch;
 beforeEach(() => {
   stubs = [];
   requests = [];
-  tokenStore.clear();
+  document.cookie = 'se_csrf=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace('http://localhost:4000', '');
     const method = init?.method ?? 'GET';
@@ -84,6 +84,7 @@ beforeEach(() => {
       path,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
       headers,
+      credentials: init?.credentials,
     });
     const stub = stubs.find((s) => s.method === method && s.path === path);
     if (!stub) {
@@ -95,35 +96,37 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  tokenStore.clear();
-});
-
-// ── tokenStore ──────────────────────────────────────────────
-
-test('tokenStore.set persists both tokens; tokenStore.clear removes them', () => {
-  assert.equal(tokenStore.access, null);
-  tokenStore.set('at-1', 'rt-1');
-  assert.equal(tokenStore.access, 'at-1');
-  assert.equal(localStorage.getItem('se.refreshToken'), 'rt-1');
-  tokenStore.clear();
-  assert.equal(tokenStore.access, null);
-  assert.equal(localStorage.getItem('se.refreshToken'), null);
+  document.cookie = 'se_csrf=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
 });
 
 // ── apiFetch core behavior ───────────────────────────────────
 
-test('apiFetch sends a Content-Type header but no Authorization header when unauthenticated', async () => {
+test('apiFetch sends a Content-Type header, includes credentials, and never sends an Authorization header (finding #6 — auth travels via httpOnly cookie, not a manually-attached header)', async () => {
   stubs.push({ method: 'GET', path: '/forms', status: 200, body: [] });
   await apiFetch('/forms');
   assert.equal(requests[0].headers['content-type'], 'application/json');
   assert.equal(requests[0].headers['authorization'], undefined);
+  assert.equal(requests[0].credentials, 'include');
 });
 
-test('apiFetch injects a Bearer token once one is stored', async () => {
-  tokenStore.set('token-123', 'refresh-123');
+test('apiFetch attaches X-CSRF-Token on a mutating request when the se_csrf cookie is present', async () => {
+  document.cookie = 'se_csrf=csrf-value-123; path=/';
+  stubs.push({ method: 'POST', path: '/leave-types', status: 201, body: {} });
+  await apiFetch('/leave-types', { method: 'POST', body: JSON.stringify({}) });
+  assert.equal(requests[0].headers['x-csrf-token'], 'csrf-value-123');
+});
+
+test('apiFetch omits X-CSRF-Token on a GET request even when the se_csrf cookie is present', async () => {
+  document.cookie = 'se_csrf=csrf-value-123; path=/';
   stubs.push({ method: 'GET', path: '/forms', status: 200, body: [] });
   await apiFetch('/forms');
-  assert.equal(requests[0].headers['authorization'], 'Bearer token-123');
+  assert.equal(requests[0].headers['x-csrf-token'], undefined);
+});
+
+test('apiFetch omits X-CSRF-Token on a mutating request when there is no se_csrf cookie yet', async () => {
+  stubs.push({ method: 'POST', path: '/leave-types', status: 201, body: {} });
+  await apiFetch('/leave-types', { method: 'POST', body: JSON.stringify({}) });
+  assert.equal(requests[0].headers['x-csrf-token'], undefined);
 });
 
 test('apiFetch resolves the parsed JSON body on a 200', async () => {
@@ -542,8 +545,7 @@ test('deleteHoliday issues a DELETE to /holidays/:id', async () => {
 
 // ── CSV downloads (bypass apiFetch, drive fetch + a client-side download directly) ──
 
-test('downloadAbsencesCsv fetches the scoped export and triggers a client download', async () => {
-  tokenStore.set('token-1', 'refresh-1');
+test('downloadAbsencesCsv fetches the scoped export with credentials included and triggers a client download', async () => {
   stubs.push({ method: 'GET', path: '/reports/export?from=2026-01-01&to=2026-01-31', status: 200, body: 'a,b\n1,2' });
   const realClick = HTMLAnchorElement.prototype.click;
   const realCreateObjectURL = URL.createObjectURL;
@@ -560,7 +562,7 @@ test('downloadAbsencesCsv fetches the scoped export and triggers a client downlo
   }
   const req = requests.find((r) => r.path.startsWith('/reports/export'));
   assert.ok(req);
-  assert.equal(req.headers['authorization'], 'Bearer token-1');
+  assert.equal(req.credentials, 'include');
 });
 
 test('downloadAbsencesCsv throws an ApiError when the export request fails', async () => {

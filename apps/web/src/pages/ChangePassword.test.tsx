@@ -56,8 +56,6 @@ const baseUser: AuthUser = {
 };
 
 function signIn(user: AuthUser) {
-  localStorage.setItem('se.accessToken', 'at-1');
-  localStorage.setItem('se.refreshToken', 'rt-1');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: user });
 }
 

@@ -49,12 +49,6 @@ describe('auth controller guards', () => {
     assert.equal(err.message, 'refreshToken is required');
   });
 
-  it('refresh rejects a malformed refreshToken with 401 (verifyRefreshToken throws before any Prisma call)', async () => {
-    const err = await invoke(authController.refresh, { body: { refreshToken: 'not-a-real-jwt' } });
-    assert.ok(err instanceof HttpError);
-    assert.equal(err.status, 401);
-  });
-
   it('me forwards a synchronous error to next() when req.user is missing (no Prisma call reached)', async () => {
     const err = await invoke(authController.me, {});
     assert.ok(err instanceof TypeError);

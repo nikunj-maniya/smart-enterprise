@@ -2,12 +2,18 @@ import { Client } from 'minio';
 
 const BUCKET = process.env.MINIO_BUCKET ?? 'smart-enterprise';
 
+function requireEnv(envVar: string): string {
+  const value = process.env[envVar];
+  if (!value) throw new Error(`${envVar} is not configured`);
+  return value;
+}
+
 const client = new Client({
   endPoint: process.env.MINIO_ENDPOINT ?? 'localhost',
   port: Number(process.env.MINIO_PORT ?? 9500),
   useSSL: false,
-  accessKey: process.env.MINIO_ACCESS_KEY ?? 'smart',
-  secretKey: process.env.MINIO_SECRET_KEY ?? 'smartminio',
+  accessKey: requireEnv('MINIO_ACCESS_KEY'),
+  secretKey: requireEnv('MINIO_SECRET_KEY'),
 });
 
 let bucketReady: Promise<void> | null = null;

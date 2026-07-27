@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { createServer } from 'node:http';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import type { HealthResponse } from '@se/shared';
 import { initSocketServer } from './lib/socket.js';
 import { authRouter } from './modules/auth/auth.routes.js';
@@ -38,6 +40,7 @@ import {
   publicSelfRegistrationRouter,
 } from './modules/self-registration/self-registration.routes.js';
 import { errorHandler } from './middleware/error.js';
+import { requireCsrfToken } from './middleware/csrf.js';
 import { globalRateLimiter, authRateLimiter } from './middleware/rate-limit.js';
 import { scheduleAutoCompleteRequestsJob } from './jobs/auto-complete-requests.job.js';
 import { scheduleApprovalRemindersJob } from './jobs/approval-reminders.job.js';
@@ -46,7 +49,23 @@ import { startSlackDeliveryWorker } from './jobs/slack-delivery.job.js';
 import { scheduleSlackDigestJob } from './jobs/slack-digest.job.js';
 
 const app = express();
-app.use(cors());
+// Only trust the reverse proxy's X-Forwarded-For when actually deployed behind one — trusting it
+// unconditionally would let a direct client spoof its own IP and dodge express-rate-limit's
+// per-IP buckets. TRUST_PROXY is the hop count (e.g. 1 for a single load balancer/ingress).
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY));
+}
+app.use(helmet());
+// Explicit origin allowlist (comma-separated) — defaults to the web app's own origin so a
+// stolen/replayed token can't be used cross-site from an arbitrary page. `credentials: true` is
+// required for the browser to send/accept the httpOnly auth cookies cross-origin (web on 5173,
+// API on 4000 in local dev).
+const corsOrigins = (process.env.CORS_ORIGIN ?? process.env.WEB_URL ?? 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim());
+app.use(cors({ origin: corsOrigins, credentials: true }));
+app.use(cookieParser());
+app.use(requireCsrfToken);
 // Slack's interaction signature is an HMAC over the exact raw bytes of the request — it must be
 // captured before the global JSON parser would otherwise consume/reserialize the body, and Slack
 // posts this endpoint as form-urlencoded, not JSON, so express.json() below leaves it untouched.
@@ -63,7 +82,9 @@ app.get('/health', (_req, res) => {
   res.json(body);
 });
 
-mountApiDocs(app);
+if (process.env.NODE_ENV !== 'production') {
+  mountApiDocs(app);
+}
 
 app.use('/auth', authRateLimiter, authRouter);
 app.use('/registrations', registrationsRouter);

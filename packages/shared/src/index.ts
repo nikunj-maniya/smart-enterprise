@@ -1418,9 +1418,11 @@ export const updateNotificationPreferenceRequestSchema = z.object({
 export type UpdateNotificationPreferenceRequest = z.infer<typeof updateNotificationPreferenceRequestSchema>;
 
 // ── Reporting & Dashboards (reporting-and-polish, role- and tenant-scoped) ──
+const ISO_DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
 export const reportRangeQuerySchema = z.object({
-  from: z.string(),
-  to: z.string(),
+  from: z.string().regex(ISO_DATE_RE, 'Expected YYYY-MM-DD'),
+  to: z.string().regex(ISO_DATE_RE, 'Expected YYYY-MM-DD'),
   projectId: z.string().optional(),
 });
 export type ReportRangeQuery = z.infer<typeof reportRangeQuerySchema>;

@@ -26,7 +26,7 @@ function LogoMark({ size = 42 }: { size?: number }) {
 export default function Login() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = React.useState('systemadmin@smartenterprise.com');
+  const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);

@@ -118,13 +118,13 @@ test('submits the registration request and shows the pending-review confirmation
   assert.deepEqual(post.body, { name: 'New Hire', email: 'newhire@acme.com', password: 'password1' });
 });
 
-test('surfaces a duplicate-email error from the API', async () => {
+test('surfaces a server error from the API', async () => {
   stubInfo();
   stubs.push({
     method: 'POST',
     path: '/public/self-registration/tok-1',
-    status: 409,
-    body: { error: 'An account with this email already exists.' },
+    status: 400,
+    body: { error: 'Something went wrong.' },
   });
   renderPage();
   await screen.findByText('Join Acme Corp');
@@ -134,5 +134,5 @@ test('surfaces a duplicate-email error from the API', async () => {
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password1' } });
   fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
 
-  assert.ok(await screen.findByText('An account with this email already exists.'));
+  assert.ok(await screen.findByText('Something went wrong.'));
 });

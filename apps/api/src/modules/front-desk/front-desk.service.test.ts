@@ -145,7 +145,10 @@ describe('getTodayView', () => {
 describe('checkInWithSignature', () => {
   it('rejects a signature that is not a base64 image data URL, before any storage/DB write (400)', async () => {
     await assert.rejects(
-      checkInWithSignature('t1', { id: 'actor1', roles: [] }, 'r1', { signature: 'not-a-data-url', consent: true }),
+      checkInWithSignature('t1', { id: 'actor1', roles: [] }, 'creq00000000000000000001', {
+        signature: 'not-a-data-url',
+        consent: true,
+      }),
       (err: unknown) => {
         assert.ok(err instanceof HttpError);
         assert.equal(err.status, 400);
@@ -157,11 +160,26 @@ describe('checkInWithSignature', () => {
 
   it('rejects a non-image data URL (e.g. text/plain), before any storage/DB write (400)', async () => {
     await assert.rejects(
-      checkInWithSignature('t1', { id: 'actor1', roles: [] }, 'r1', {
+      checkInWithSignature('t1', { id: 'actor1', roles: [] }, 'creq00000000000000000001', {
         signature: 'data:text/plain;base64,AAAA',
         consent: true,
       }),
       (err: unknown) => err instanceof HttpError && err.status === 400,
+    );
+  });
+
+  it('rejects a non-cuid request id before it reaches the storage key, DB, or signature check (400)', async () => {
+    await assert.rejects(
+      checkInWithSignature('t1', { id: 'actor1', roles: [] }, '../../etc/passwd', {
+        signature: 'not-a-data-url',
+        consent: true,
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof HttpError);
+        assert.equal(err.status, 400);
+        assert.equal(err.message, 'Invalid request id');
+        return true;
+      },
     );
   });
 });

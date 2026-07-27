@@ -58,8 +58,6 @@ const enterpriseAdmin: AuthUser = {
 const systemAdmin: AuthUser = { ...employee, id: 'u-4', name: 'Sam System', isSystemAdmin: true, roles: [] };
 
 function stubMe(user: AuthUser) {
-  localStorage.setItem('se.accessToken', 'test-token');
-  localStorage.setItem('se.refreshToken', 'test-refresh');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: user });
 }
 
@@ -138,5 +136,4 @@ test('logging out clears the session and reverts the user footer to signed-out s
   assert.equal(screen.getByText('Enterprise Admin', { selector: 'div' }).textContent, 'Enterprise Admin');
   fireEvent.click(screen.getByLabelText('Log out'));
   assert.equal(screen.queryByText('Eve Admin'), null);
-  assert.equal(localStorage.getItem('se.accessToken'), null);
 });

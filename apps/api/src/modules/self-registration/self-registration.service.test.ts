@@ -264,17 +264,9 @@ describe('registerViaToken (public signup)', () => {
     assert.equal(calls.userFindUnique.length, 0);
   });
 
-  it('rejects a duplicate email with 409 and does not open a transaction', async () => {
+  it('silently no-ops on a duplicate email and does not open a transaction (avoids email enumeration)', async () => {
     existingUserRow = { id: 'existing', email: 'alice@example.com' };
-    await assert.rejects(
-      registerViaToken('tok123', { name: 'Alice', email: 'alice@example.com', password: 'longenough1' }),
-      (err: unknown) => {
-        assert.ok(err instanceof HttpError);
-        assert.equal(err.status, 409);
-        assert.equal(err.message, 'This email is already registered.');
-        return true;
-      },
-    );
+    await registerViaToken('tok123', { name: 'Alice', email: 'alice@example.com', password: 'longenough1' });
     assert.equal(calls.transactions, 0);
   });
 

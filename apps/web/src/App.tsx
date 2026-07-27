@@ -77,11 +77,46 @@ export default function App() {
         }
       >
         <Route path="/" element={<Home />} />
-        <Route path="/registrations" element={<Registrations />} />
-        <Route path="/enterprises" element={<Enterprises />} />
-        <Route path="/users" element={<PlatformUsers />} />
-        <Route path="/audit" element={<AuditLog />} />
-        <Route path="/settings" element={<Settings />} />
+        <Route
+          path="/registrations"
+          element={
+            <RequireRole systemAdmin>
+              <Registrations />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/enterprises"
+          element={
+            <RequireRole systemAdmin>
+              <Enterprises />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <RequireRole systemAdmin>
+              <PlatformUsers />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/audit"
+          element={
+            <RequireRole systemAdmin>
+              <AuditLog />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <RequireRole systemAdmin>
+              <Settings />
+            </RequireRole>
+          }
+        />
         <Route path="/profile" element={<Profile />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/requests" element={<MyRequests />} />

@@ -69,10 +69,10 @@ function renderLogin(initialPath = '/login') {
   );
 }
 
-test('pre-fills the email field with the default system admin address', () => {
+test('leaves the email field blank — no admin address pre-filled', () => {
   renderLogin();
   const emailInput = screen.getByLabelText('Email') as HTMLInputElement;
-  assert.equal(emailInput.value, 'systemadmin@smartenterprise.com');
+  assert.equal(emailInput.value, '');
 });
 
 test('logs in and redirects to / when no password change is required', async () => {
@@ -126,8 +126,6 @@ test('surfaces a 401 error from the API next to the form', async () => {
 });
 
 test('an already-authenticated user is redirected away from /login', async () => {
-  localStorage.setItem('se.accessToken', 'at-1');
-  localStorage.setItem('se.refreshToken', 'rt-1');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: baseUser });
   renderLogin();
 

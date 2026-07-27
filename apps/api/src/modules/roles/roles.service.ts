@@ -170,6 +170,23 @@ export async function setRoleArchived(
   return toDto(updated);
 }
 
+/** The escalation-matrix row that targets this role, if any (schema.prisma `EscalationRule.toRoleId`). */
+async function findEscalationReference(tenantId: string, roleId: string) {
+  return prisma.escalationRule.findFirst({ where: { tenantId, toRoleId: roleId } });
+}
+
+/** The first form-picker field whose `options.roles` filter names this role's key, if any. */
+async function findFormFieldReference(tenantId: string, roleKey: string) {
+  const fields = await prisma.formField.findMany({
+    where: { section: { form: { tenantId } }, type: 'user-picker' },
+    select: { label: true, options: true, section: { select: { form: { select: { title: true } } } } },
+  });
+  return fields.find((f) => {
+    const roles = (f.options as { roles?: unknown } | null)?.roles;
+    return Array.isArray(roles) && roles.includes(roleKey);
+  });
+}
+
 export async function deleteRole(tenantId: string, id: string, actorId: string): Promise<void> {
   const existing = await prisma.role.findUnique({
     where: { id },
@@ -182,6 +199,22 @@ export async function deleteRole(tenantId: string, id: string, actorId: string):
     throw new HttpError(
       409,
       `This role is assigned to ${n} member${n === 1 ? '' : 's'}. Reassign them before deleting it.`,
+    );
+  }
+
+  const escalationRef = await findEscalationReference(tenantId, id);
+  if (escalationRef) {
+    throw new HttpError(
+      409,
+      `This role is the escalation target for "${escalationRef.fromContext}". Update the escalation matrix before deleting it.`,
+    );
+  }
+
+  const formFieldRef = await findFormFieldReference(tenantId, existing.key);
+  if (formFieldRef) {
+    throw new HttpError(
+      409,
+      `This role is referenced by the "${formFieldRef.label}" field on the ${formFieldRef.section.form.title} form. Update that field before deleting the role.`,
     );
   }
 

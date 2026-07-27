@@ -28,10 +28,12 @@ All personas share `E2E_PERSONA_PASSWORD` (default `E2ePass@123`).
 ## Run
 
 ```bash
-# 2. Isolated API (4001) — raised rate limits so parallel workers from one IP aren't throttled
+# 2. Isolated API (4001) — raised rate limits so parallel workers from one IP aren't throttled.
+# WEB_URL must match the isolated web's own origin (step 3) — the API's CORS allowlist defaults
+# to it, so an unset/mismatched value here gets every request from the test frontend CORS-blocked.
 cd apps/api
 API_PORT=4001 DATABASE_URL="postgresql://smart:smart@localhost:5544/smart_enterprise_test?schema=public" \
-  REDIS_URL="redis://localhost:6399/1" MINIO_BUCKET="e2e-test" \
+  REDIS_URL="redis://localhost:6399/1" MINIO_BUCKET="e2e-test" WEB_URL="http://localhost:5174" \
   AUTH_RATE_LIMIT=100000 GLOBAL_RATE_LIMIT=100000 npx tsx src/index.ts
 
 # 3. Isolated web (5174)

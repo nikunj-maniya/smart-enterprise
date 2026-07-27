@@ -4,7 +4,6 @@ import * as React from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import type { AuthUser } from '@se/shared';
 import { AuthProvider, useAuth } from './auth';
-import { tokenStore } from './api';
 
 interface Stub {
   method: string;
@@ -20,7 +19,6 @@ const realFetch = globalThis.fetch;
 beforeEach(() => {
   stubs = [];
   requests = [];
-  tokenStore.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace('http://localhost:4000', '');
     const method = init?.method ?? 'GET';
@@ -35,7 +33,6 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  tokenStore.clear();
   cleanup();
 });
 
@@ -61,16 +58,16 @@ const adaUser: AuthUser = {
   roles: ['employee'],
 };
 
-test('starts with loading=true and settles to user=null when no token is stored', async () => {
+test('always calls GET /auth/me on mount (tokens are httpOnly cookies, not JS-readable) and settles to user=null on a 401', async () => {
+  stubs.push({ method: 'GET', path: '/auth/me', status: 401, body: { error: 'Unauthorized' } });
   const { result } = renderHook(() => useAuth(), { wrapper });
   await flush();
   assert.equal(result.current.loading, false);
   assert.equal(result.current.user, null);
-  assert.equal(requests.length, 0);
+  assert.ok(requests.find((r) => r.method === 'GET' && r.path === '/auth/me'));
 });
 
-test('auto-loads the user from a stored token via GET /auth/me', async () => {
-  tokenStore.set('at-1', 'rt-1');
+test('auto-loads the user from an existing session via GET /auth/me', async () => {
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: adaUser });
   const { result } = renderHook(() => useAuth(), { wrapper });
   await flush();
@@ -78,22 +75,13 @@ test('auto-loads the user from a stored token via GET /auth/me', async () => {
   assert.deepEqual(result.current.user, adaUser);
 });
 
-test('clears the stored token when the initial /auth/me call fails', async () => {
-  tokenStore.set('at-1', 'rt-1');
-  stubs.push({ method: 'GET', path: '/auth/me', status: 401, body: { error: 'Unauthorized' } });
-  const { result } = renderHook(() => useAuth(), { wrapper });
-  await flush();
-  assert.equal(result.current.loading, false);
-  assert.equal(result.current.user, null);
-  assert.equal(tokenStore.access, null);
-});
-
-test('login persists both tokens and sets the authenticated user', async () => {
+test('login sets the authenticated user from the response body (the server sets auth cookies out of band)', async () => {
+  stubs.push({ method: 'GET', path: '/auth/me', status: 401 });
   stubs.push({
     method: 'POST',
     path: '/auth/login',
     status: 200,
-    body: { accessToken: 'at-1', refreshToken: 'rt-1', user: adaUser },
+    body: { user: adaUser },
   });
   const { result } = renderHook(() => useAuth(), { wrapper });
   await flush();
@@ -105,7 +93,6 @@ test('login persists both tokens and sets the authenticated user', async () => {
 
   assert.deepEqual(returned, adaUser);
   assert.deepEqual(result.current.user, adaUser);
-  assert.equal(tokenStore.access, 'at-1');
   const loginCall = requests.find((r) => r.path === '/auth/login');
   assert.ok(loginCall);
   assert.equal(loginCall.method, 'POST');
@@ -121,7 +108,6 @@ test('changePassword updates the authenticated user with the response', async ()
       body: { ...adaUser, mustChangePassword: false },
     },
   );
-  tokenStore.set('at-1', 'rt-1');
   const { result } = renderHook(() => useAuth(), { wrapper });
   await flush();
 
@@ -135,7 +121,6 @@ test('changePassword updates the authenticated user with the response', async ()
 
 test('refresh() re-fetches /auth/me and replaces the authenticated user', async () => {
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: adaUser });
-  tokenStore.set('at-1', 'rt-1');
   const { result } = renderHook(() => useAuth(), { wrapper });
   await flush();
   assert.deepEqual(result.current.user, adaUser);
@@ -150,16 +135,19 @@ test('refresh() re-fetches /auth/me and replaces the authenticated user', async 
   assert.deepEqual(result.current.user, renamed);
 });
 
-test('logout clears stored tokens and the authenticated user', async () => {
-  stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: adaUser });
-  tokenStore.set('at-1', 'rt-1');
+test('logout calls POST /auth/logout (revoking the session server-side) and clears the authenticated user', async () => {
+  stubs.push(
+    { method: 'GET', path: '/auth/me', status: 200, body: adaUser },
+    { method: 'POST', path: '/auth/logout', status: 200, body: { ok: true } },
+  );
   const { result } = renderHook(() => useAuth(), { wrapper });
   await flush();
   assert.deepEqual(result.current.user, adaUser);
 
   act(() => result.current.logout());
   assert.equal(result.current.user, null);
-  assert.equal(tokenStore.access, null);
+  await flush();
+  assert.ok(requests.find((r) => r.method === 'POST' && r.path === '/auth/logout'));
 });
 
 test('useAuth throws when called outside an AuthProvider', () => {

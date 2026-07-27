@@ -49,8 +49,8 @@ Object.defineProperty(prisma, 'user', {
 Object.defineProperty(cacheRedis, 'get', { value: async () => null, configurable: true });
 Object.defineProperty(cacheRedis, 'set', { value: async () => 'OK', configurable: true });
 
-function fakeSocket(token?: string): Socket {
-  return { handshake: { auth: { token } }, data: {} } as unknown as Socket;
+function fakeSocket(token?: string, cookieHeader?: string): Socket {
+  return { handshake: { auth: { token }, headers: { cookie: cookieHeader } }, data: {} } as unknown as Socket;
 }
 
 function invokeMiddleware(token?: string): Promise<Error | undefined> {
@@ -110,6 +110,25 @@ describe('socket auth handshake (after initSocketServer)', () => {
     });
     assert.equal(err, undefined);
     assert.equal(socket.data.userId, 'active-user');
+  });
+
+  it('accepts a valid token carried in the se_access cookie instead of auth.token (finding #6 — no JS-readable token to pass)', async () => {
+    userRow = {
+      id: 'cookie-user',
+      email: 'a@b.c',
+      isSystemAdmin: false,
+      tenantId: 't1',
+      status: 'Active',
+      tenant: { status: 'Active' },
+      roles: [],
+    };
+    const token = signAccessToken('cookie-user');
+    const socket = fakeSocket(undefined, `se_access=${token}; se_csrf=unrelated-value`);
+    const err = await new Promise<Error | undefined>((resolve) => {
+      void capturedMiddleware!(socket, (e) => resolve(e));
+    });
+    assert.equal(err, undefined);
+    assert.equal(socket.data.userId, 'cookie-user');
   });
 
   it('emitToUser targets the room named after the user id', () => {
