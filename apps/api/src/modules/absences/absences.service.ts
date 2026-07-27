@@ -44,9 +44,11 @@ export async function listAbsences(tenantId: string, viewer: Viewer, query: Abse
   const projectIds = [...new Set(rows.map((r) => r.projectId).filter((v): v is string => !!v))];
   const departmentIds = [...new Set(rows.map((r) => r.departmentId).filter((v): v is string => !!v))];
   const [projects, departments] = await Promise.all([
-    projectIds.length ? prisma.project.findMany({ where: { id: { in: projectIds } }, select: { id: true, name: true } }) : [],
+    projectIds.length
+      ? prisma.project.findMany({ where: { id: { in: projectIds }, tenantId }, select: { id: true, name: true } })
+      : [],
     departmentIds.length
-      ? prisma.department.findMany({ where: { id: { in: departmentIds } }, select: { id: true, name: true } })
+      ? prisma.department.findMany({ where: { id: { in: departmentIds }, tenantId }, select: { id: true, name: true } })
       : [],
   ]);
   const projectNameById = new Map(projects.map((p) => [p.id, p.name]));

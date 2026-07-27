@@ -326,6 +326,7 @@ describe('createRequest', () => {
       ],
       { approvers: [{ source: 'field', field: 'techLead' }] },
     );
+    approverUserRows = [{ id: 'tech-lead-user', name: 'Tech Lead' }];
     await assert.rejects(
       () =>
         createRequest(
@@ -394,6 +395,10 @@ describe('createRequest', () => {
     );
     leaveTypeRow = { id: 'lt1', isPaid: true };
     leaveBalanceRow = { balance: 2 }; // < the 5 days requested → over-balance
+    approverUserRows = [
+      { id: 'tech-lead-user', name: 'Tech Lead' },
+      { id: 'hr-head-user', name: 'HR Head' },
+    ];
 
     const dto = await createRequest(
       't1',
@@ -463,6 +468,9 @@ describe('createRequest', () => {
       { approvers: [{ source: 'field', field: 'techLead' }] },
     );
     escalationConfig = { rule: { toRoleId: 'role-hr-head' }, activeRoleHolderId: 'hr-head-user' };
+    // The requester genuinely holds the tech-lead role themself (that's why self-approval
+    // escalation is needed at all — an ineligible id would be rejected before escalation runs).
+    approverUserRows = [{ id: 'req-1', name: 'Requester' }];
 
     // The requester names themself as the tech-lead approver.
     await createRequest('t1', 'req-1', input('onboarding', { techLead: 'req-1' }));
