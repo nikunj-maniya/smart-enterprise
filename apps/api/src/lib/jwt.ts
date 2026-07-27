@@ -1,7 +1,16 @@
 import jwt from 'jsonwebtoken';
 
-const accessSecret = process.env.JWT_ACCESS_SECRET ?? 'change-me-access';
-const refreshSecret = process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh';
+const INSECURE_PLACEHOLDERS = new Set(['change-me-access']);
+
+function requireSecret(envVar: string): string {
+  const value = process.env[envVar];
+  if (!value || INSECURE_PLACEHOLDERS.has(value)) {
+    throw new Error(`${envVar} must be set to a real secret (not unset or the .env.example placeholder)`);
+  }
+  return value;
+}
+
+const accessSecret = requireSecret('JWT_ACCESS_SECRET');
 
 export interface TokenPayload {
   sub: string; // user id
@@ -11,14 +20,6 @@ export function signAccessToken(userId: string): string {
   return jwt.sign({ sub: userId } satisfies TokenPayload, accessSecret, { expiresIn: '15m' });
 }
 
-export function signRefreshToken(userId: string): string {
-  return jwt.sign({ sub: userId } satisfies TokenPayload, refreshSecret, { expiresIn: '7d' });
-}
-
 export function verifyAccessToken(token: string): TokenPayload {
   return jwt.verify(token, accessSecret) as TokenPayload;
-}
-
-export function verifyRefreshToken(token: string): TokenPayload {
-  return jwt.verify(token, refreshSecret) as TokenPayload;
 }
