@@ -102,8 +102,10 @@ export async function registerViaToken(
 ): Promise<void> {
   const link = await resolveActiveLink(token);
 
+  // Resolve the same way whether or not the email is already registered — avoids email
+  // enumeration, same pattern as requestPasswordReset.
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
-  if (existing) throw new HttpError(409, 'This email is already registered.');
+  if (existing) return;
 
   const employeeRole = await prisma.role.findUnique({
     where: { tenantId_key: { tenantId: link.tenantId, key: SystemRoleKey.Employee } },
