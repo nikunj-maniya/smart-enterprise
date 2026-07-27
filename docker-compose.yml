@@ -52,6 +52,7 @@ services:
       REDIS_URL: redis://redis:6379
       SYSTEM_ADMIN_EMAIL: systemadmin@smartenterprise.com
       SYSTEM_ADMIN_PASSWORD: Smart@123
+      JWT_ACCESS_SECRET: 0qrfyQ9iL9EylDIipIVpEPHWSYiAs10ljlnjWmAzE/s=
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       MINIO_ACCESS_KEY: smart

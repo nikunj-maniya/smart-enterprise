@@ -4,12 +4,33 @@ import { TenantStatus, UserStatus } from '@prisma/client';
 import type { AuthUser, LoginResponse } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../lib/jwt.js';
+import { signAccessToken } from '../../lib/jwt.js';
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+/** Refresh tokens are opaque random strings, not JWTs — `RefreshTokenSession.tokenHash` is the
+ *  only server-side record of them, so logout/password-change can actually revoke one before its
+ *  TTL, unlike a self-contained JWT (security audit finding #5). */
+async function issueRefreshToken(userId: string): Promise<string> {
+  const token = randomBytes(32).toString('hex');
+  await prisma.refreshTokenSession.create({
+    data: { userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS) },
+  });
+  return token;
+}
+
+/** Revokes every outstanding refresh-token session for a user — called on password change/reset
+ *  so a stolen refresh token doesn't survive the very action meant to lock the account down. */
+async function revokeAllRefreshTokens(userId: string): Promise<void> {
+  await prisma.refreshTokenSession.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
 }
 
 const withRolesAndTenant = {
@@ -54,7 +75,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return {
     user: toAuthUser(user),
     accessToken: signAccessToken(user.id),
-    refreshToken: signRefreshToken(user.id),
+    refreshToken: await issueRefreshToken(user.id),
   };
 }
 
@@ -81,6 +102,7 @@ export async function changePassword(
     data: { passwordHash, mustChangePassword: false },
     include: withRolesAndTenant,
   });
+  await revokeAllRefreshTokens(userId);
   return toAuthUser(updated);
 }
 
@@ -98,10 +120,14 @@ export async function requestPasswordReset(email: string): Promise<void> {
     },
   });
 
-  // No email provider is wired up yet (D-30) — log the link as a stand-in for the email send.
-  const resetUrl = `${process.env.WEB_URL ?? 'http://localhost:5173'}/reset-password?token=${token}`;
-  // eslint-disable-next-line no-console
-  console.log(`[password-reset] link for ${email}: ${resetUrl}`);
+  // No email provider is wired up yet (D-30) — log the link as a dev-only stand-in for the
+  // email send. Never log the raw reset token in production: log aggregators/container stdout
+  // capture would otherwise expose a live, unhashed reset credential.
+  if (process.env.NODE_ENV !== 'production') {
+    const resetUrl = `${process.env.WEB_URL ?? 'http://localhost:5173'}/reset-password?token=${token}`;
+    // eslint-disable-next-line no-console
+    console.log(`[password-reset] link for ${email}: ${resetUrl}`);
+  }
 }
 
 export async function resetPassword(token: string, newPassword: string): Promise<void> {
@@ -118,21 +144,37 @@ export async function resetPassword(token: string, newPassword: string): Promise
     }),
     prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
   ]);
+  await revokeAllRefreshTokens(record.userId);
 }
 
 export async function refresh(refreshToken: string) {
-  let payload;
-  try {
-    payload = verifyRefreshToken(refreshToken);
-  } catch {
+  const session = await prisma.refreshTokenSession.findUnique({ where: { tokenHash: hashToken(refreshToken) } });
+  if (!session || session.revokedAt || session.expiresAt < new Date()) {
     throw new HttpError(401, 'Invalid or expired refresh token');
   }
-  const user = await prisma.user.findUnique({ where: { id: payload.sub }, include: { tenant: true } });
+  const user = await prisma.user.findUnique({ where: { id: session.userId }, include: { tenant: true } });
   if (!user || user.status !== UserStatus.Active || user.tenant?.status === TenantStatus.Suspended) {
     throw new HttpError(401, 'User not found or inactive');
   }
+
+  // Rotate: revoke the token just used before issuing its replacement, so a replayed old
+  // refresh token (e.g. a copy an attacker captured) is rejected on its next use.
+  const [, newRefreshToken] = await Promise.all([
+    prisma.refreshTokenSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } }),
+    issueRefreshToken(user.id),
+  ]);
+
   return {
     accessToken: signAccessToken(user.id),
-    refreshToken: signRefreshToken(user.id),
+    refreshToken: newRefreshToken,
   };
+}
+
+/** Revokes exactly the refresh-token session presented at logout — a no-op if it's already
+ *  unknown/revoked, so logout stays idempotent. */
+export async function logout(refreshToken: string): Promise<void> {
+  await prisma.refreshTokenSession.updateMany({
+    where: { tokenHash: hashToken(refreshToken), revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
 }

@@ -2,7 +2,6 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanup, render, screen } from '@testing-library/react';
 import { AuthProvider } from '@/lib/auth';
-import { tokenStore } from '@/lib/api';
 import { RegistrationsCountProvider, useRegistrationsCount } from './registrationsCount';
 
 interface Stub {
@@ -19,7 +18,6 @@ const realFetch = globalThis.fetch;
 beforeEach(() => {
   stubs = [];
   requests = [];
-  tokenStore.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace('http://localhost:4000', '');
     const method = init?.method ?? 'GET';
@@ -34,7 +32,6 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  tokenStore.clear();
   cleanup();
 });
 
@@ -59,7 +56,6 @@ function renderProvider() {
 }
 
 test('fetches the pending count on mount for a system admin', async () => {
-  tokenStore.set('at-1', 'rt-1');
   stubs.push(
     {
       method: 'GET',
@@ -83,7 +79,6 @@ test('fetches the pending count on mount for a system admin', async () => {
 });
 
 test('never calls the registrations endpoint for a non-system-admin user', async () => {
-  tokenStore.set('at-1', 'rt-1');
   stubs.push({
     method: 'GET',
     path: '/auth/me',
@@ -110,7 +105,6 @@ test('defaults to a pendingCount of 0 with no signed-in user', async () => {
 });
 
 test('refresh() re-fetches and updates the pending count', async () => {
-  tokenStore.set('at-1', 'rt-1');
   stubs.push(
     {
       method: 'GET',

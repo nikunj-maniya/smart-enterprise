@@ -100,8 +100,6 @@ test('surfaces an API error instead of the confirmation screen', async () => {
 });
 
 test('an already-authenticated user is redirected to / (no forced password change)', async () => {
-  localStorage.setItem('se.accessToken', 'at-1');
-  localStorage.setItem('se.refreshToken', 'rt-1');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: baseUser });
   renderPage();
 
@@ -109,8 +107,6 @@ test('an already-authenticated user is redirected to / (no forced password chang
 });
 
 test('an already-authenticated user who must change their password is redirected to /change-password', async () => {
-  localStorage.setItem('se.accessToken', 'at-1');
-  localStorage.setItem('se.refreshToken', 'rt-1');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: { ...baseUser, mustChangePassword: true } });
   renderPage();
 

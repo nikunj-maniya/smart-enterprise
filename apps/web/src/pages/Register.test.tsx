@@ -128,8 +128,6 @@ test('surfaces a duplicate-registration error from the API', async () => {
 });
 
 test('an already-authenticated user is redirected away from /register', async () => {
-  localStorage.setItem('se.accessToken', 'at-1');
-  localStorage.setItem('se.refreshToken', 'rt-1');
   stubs.push({ method: 'GET', path: '/auth/me', status: 200, body: baseUser });
   renderPage();
 

@@ -1,6 +1,6 @@
 import * as React from 'react';
-import type { AuthUser, LoginResponse } from '@se/shared';
-import { apiFetch, tokenStore } from './api';
+import type { AuthUser } from '@se/shared';
+import { apiFetch } from './api';
 import { disconnectSocket } from './socket';
 
 interface AuthContextValue {
@@ -19,22 +19,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    if (!tokenStore.access) {
-      setLoading(false);
-      return;
-    }
+    // Tokens live in httpOnly cookies (finding #6) — there's no JS-readable flag to check before
+    // deciding whether to ask, so this always asks; a 401 just means "not logged in."
     apiFetch<AuthUser>('/auth/me')
       .then(setUser)
-      .catch(() => tokenStore.clear())
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
   const login = React.useCallback(async (email: string, password: string) => {
-    const res = await apiFetch<LoginResponse>('/auth/login', {
+    // The server sets the auth cookies on this response — the web app never reads the tokens
+    // back out of the body or persists them itself.
+    const res = await apiFetch<{ user: AuthUser }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    tokenStore.set(res.accessToken, res.refreshToken);
     setUser(res.user);
     return res.user;
   }, []);
@@ -57,7 +56,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = React.useCallback(() => {
-    tokenStore.clear();
+    // Best-effort: revoke the refresh-token session server-side too (reading it from the
+    // httpOnly cookie), so a token an attacker already captured is dead the moment the real user
+    // logs out, not just locally forgotten. The server also clears the auth cookies.
+    apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
     disconnectSocket();
     setUser(null);
   }, []);

@@ -6,12 +6,17 @@ import {
   resetPasswordRequestSchema,
 } from '@se/shared';
 import { HttpError } from '../../lib/http-error.js';
+import { setAuthCookies, clearAuthCookies, getRefreshTokenCookie } from '../../lib/auth-cookies.js';
 import * as authService from './auth.service.js';
 
 export async function login(req: Request, res: Response, next: NextFunction) {
   try {
     const { email, password } = loginRequestSchema.parse(req.body);
-    res.json(await authService.login(email, password));
+    const result = await authService.login(email, password);
+    setAuthCookies(res, result.accessToken, result.refreshToken);
+    // Tokens stay in the body too for Bearer-header clients (e2e fixtures, Swagger/Postman) —
+    // the web app itself never reads them back out; it relies on the cookies just set above.
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -56,15 +61,23 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
 
 export async function refresh(req: Request, res: Response, next: NextFunction) {
   try {
-    const token = req.body?.refreshToken;
+    const token = req.body?.refreshToken ?? getRefreshTokenCookie(req);
     if (!token) throw new HttpError(400, 'refreshToken is required');
-    res.json(await authService.refresh(token));
+    const result = await authService.refresh(token);
+    setAuthCookies(res, result.accessToken, result.refreshToken);
+    res.json(result);
   } catch (err) {
     next(err);
   }
 }
 
-export function logout(_req: Request, res: Response) {
-  // Stateless JWT: client discards tokens. Endpoint exists for symmetry / future revocation.
-  res.json({ ok: true });
+export async function logout(req: Request, res: Response, next: NextFunction) {
+  try {
+    const token = req.body?.refreshToken ?? getRefreshTokenCookie(req);
+    if (token) await authService.logout(token);
+    clearAuthCookies(res);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 }

@@ -42,12 +42,7 @@ describe('auth routes (pre-DB behavior)', () => {
     assert.equal(res.body.error, 'refreshToken is required');
   });
 
-  it('rejects refresh with a malformed refreshToken (401, before any Prisma call)', async () => {
-    const res = await request(buildApp()).post('/auth/refresh').send({ refreshToken: 'not-a-real-jwt' });
-    assert.equal(res.status, 401);
-  });
-
-  it('logout succeeds with no auth required (stateless JWT, no DB touch)', async () => {
+  it('logout succeeds with no refreshToken in the body (no-op, no DB touch)', async () => {
     const res = await request(buildApp()).post('/auth/logout').send({});
     assert.equal(res.status, 200);
     assert.deepEqual(res.body, { ok: true });

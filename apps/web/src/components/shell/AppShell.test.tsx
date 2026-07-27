@@ -2,8 +2,14 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { Manager } from 'socket.io-client';
 import { AuthProvider } from '@/lib/auth';
 import { AppShell } from './AppShell';
+
+// `getSocket()` always connects now (no JS-readable token to gate on since finding #6) — patch
+// out the actual transport open so the Topbar's `onNewNotification` never opens a real connection
+// in this unit test (a real one hangs the process waiting to reconnect against nothing).
+Object.defineProperty(Manager.prototype, 'open', { value: function () {}, configurable: true });
 
 interface Stub {
   method: string;
@@ -33,8 +39,8 @@ afterEach(() => {
   cleanup();
 });
 
-// No token is set (no signed-in user), which keeps this to a structural smoke test: the
-// Topbar's notification poll still runs unconditionally, so it needs a stub regardless.
+// A structural smoke test: the Topbar's notification poll runs unconditionally, so it needs a
+// stub regardless of whether a user is signed in.
 function renderShell(initialPath: string) {
   stubs.push({
     method: 'GET',

@@ -60,8 +60,6 @@ function loginAs(roles: string[]) {
     tenantName: 'Acme',
     roles,
   };
-  localStorage.setItem('se.accessToken', 'at-1');
-  localStorage.setItem('se.refreshToken', 'rt-1');
 }
 
 function renderPage() {

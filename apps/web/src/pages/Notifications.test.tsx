@@ -2,8 +2,14 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { Manager } from 'socket.io-client';
 import type { NotificationDto } from '@se/shared';
 import Notifications from './Notifications';
+
+// `getSocket()` always connects now (no JS-readable token to gate on since finding #6) — patch
+// out the actual transport open so this page's `onNewNotification` never opens a real connection
+// in this unit test (a real one hangs the process waiting to reconnect against nothing).
+Object.defineProperty(Manager.prototype, 'open', { value: function () {}, configurable: true });
 
 interface Stub {
   method: string;
@@ -40,9 +46,6 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   cleanup();
 });
-
-// No access token is stored in any of these tests, so `onNewNotification`'s socket connection
-// short-circuits to a no-op (see socket.test.ts) — nothing here depends on a live push.
 
 const approvalNotif: NotificationDto = {
   id: 'n-1',

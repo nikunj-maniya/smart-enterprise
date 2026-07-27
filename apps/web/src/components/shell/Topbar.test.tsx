@@ -2,9 +2,15 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { Manager } from 'socket.io-client';
 import type { NotificationDto } from '@se/shared';
 import { AuthProvider } from '@/lib/auth';
 import { Topbar } from './Topbar';
+
+// `getSocket()` now always connects (no JS-readable token to gate on since finding #6) — patch
+// out the actual transport open so Topbar's `onNewNotification` never opens a real connection in
+// this unit test (a real one hangs the process waiting to reconnect against nothing).
+Object.defineProperty(Manager.prototype, 'open', { value: function () {}, configurable: true });
 
 interface Stub {
   method: string;
@@ -42,10 +48,9 @@ afterEach(() => {
   cleanup();
 });
 
-// No access token is ever stored in these tests: Topbar's NotificationsMenu wires up
-// `onNewNotification`, which opens a real socket.io connection when a token is present —
-// undesirable in a unit test. With no token, `getSocket()` short-circuits to a no-op, and
-// nothing here depends on a signed-in `user` besides the '?' initials placeholder.
+// Topbar's NotificationsMenu wires up `onNewNotification` unconditionally (the `Manager.prototype.open`
+// patch above keeps that from opening a real connection) — nothing here depends on a signed-in
+// `user` besides the '?' initials placeholder.
 function stubNotifications(rows: NotificationDto[], unreadCount: number) {
   stubs.push({
     method: 'GET',

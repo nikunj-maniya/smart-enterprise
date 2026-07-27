@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import argon2 from 'argon2';
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
-import { signRefreshToken, verifyAccessToken, verifyRefreshToken } from '../../lib/jwt.js';
+import { verifyAccessToken } from '../../lib/jwt.js';
 import * as authService from './auth.service.js';
 
 /**
@@ -34,10 +34,32 @@ type ResetTokenRow = {
   usedAt: Date | null;
 };
 
+type RefreshSessionRow = {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+};
+
 let userRow: UserRow | null = null;
 let resetTokenRow: ResetTokenRow | null = null;
-const updateCalls = { user: [] as { where: { id: string }; data: Record<string, unknown> }[], resetToken: [] as { where: { id: string }; data: Record<string, unknown> }[] };
-const createCalls = { resetToken: [] as { data: { userId: string; tokenHash: string; expiresAt: Date } }[] };
+/** `findUnique` on `refreshTokenSession` ignores its `where` and just returns this — same
+ *  shortcut `resetTokenRow` already uses below (the raw token passed to a test doesn't need to
+ *  actually hash to this row's `tokenHash` for the stub to "find" it). */
+let refreshSessionRow: RefreshSessionRow | null = null;
+const updateCalls = {
+  user: [] as { where: { id: string }; data: Record<string, unknown> }[],
+  resetToken: [] as { where: { id: string }; data: Record<string, unknown> }[],
+  refreshSession: [] as { where: { id: string }; data: Record<string, unknown> }[],
+};
+const createCalls = {
+  resetToken: [] as { data: { userId: string; tokenHash: string; expiresAt: Date } }[],
+  refreshSession: [] as { data: { userId: string; tokenHash: string; expiresAt: Date } }[],
+};
+const updateManyCalls = {
+  refreshSession: [] as { where: Record<string, unknown>; data: Record<string, unknown> }[],
+};
 
 Object.defineProperty(prisma, 'user', {
   value: {
@@ -65,6 +87,25 @@ Object.defineProperty(prisma, 'passwordResetToken', {
   configurable: true,
 });
 
+Object.defineProperty(prisma, 'refreshTokenSession', {
+  value: {
+    findUnique: async () => refreshSessionRow,
+    create: async (args: { data: { userId: string; tokenHash: string; expiresAt: Date } }) => {
+      createCalls.refreshSession.push(args);
+      return { id: 'rts-new', revokedAt: null, createdAt: new Date(), ...args.data };
+    },
+    update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+      updateCalls.refreshSession.push(args);
+      return { ...(refreshSessionRow as RefreshSessionRow), ...args.data };
+    },
+    updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+      updateManyCalls.refreshSession.push(args);
+      return { count: 1 };
+    },
+  },
+  configurable: true,
+});
+
 Object.defineProperty(prisma, '$transaction', {
   value: async (ops: Promise<unknown>[]) => Promise.all(ops),
   configurable: true,
@@ -86,6 +127,17 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
   };
 }
 
+function makeSession(overrides: Partial<RefreshSessionRow> = {}): RefreshSessionRow {
+  return {
+    id: 'rts1',
+    userId: 'u1',
+    tokenHash: 'x'.repeat(64),
+    expiresAt: new Date(Date.now() + 1000),
+    revokedAt: null,
+    ...overrides,
+  };
+}
+
 describe('auth.service', () => {
   let correctHash: string;
 
@@ -96,9 +148,13 @@ describe('auth.service', () => {
   beforeEach(() => {
     userRow = null;
     resetTokenRow = null;
+    refreshSessionRow = null;
     updateCalls.user.length = 0;
     updateCalls.resetToken.length = 0;
+    updateCalls.refreshSession.length = 0;
     createCalls.resetToken.length = 0;
+    createCalls.refreshSession.length = 0;
+    updateManyCalls.refreshSession.length = 0;
   });
 
   describe('login', () => {
@@ -169,7 +225,7 @@ describe('auth.service', () => {
       );
     });
 
-    it('resolves with the mapped user and a verifiable access/refresh token pair on success', async () => {
+    it('resolves with the mapped user, a verifiable access token, and a stored opaque refresh token', async () => {
       const user = makeUser({ passwordHash: correctHash });
       userRow = user;
       const result = await authService.login(user.email, 'correct-password');
@@ -185,7 +241,14 @@ describe('auth.service', () => {
         roles: ['employee'],
       });
       assert.equal(verifyAccessToken(result.accessToken).sub, 'u1');
-      assert.equal(verifyRefreshToken(result.refreshToken).sub, 'u1');
+
+      assert.match(result.refreshToken, /^[0-9a-f]{64}$/);
+      assert.equal(createCalls.refreshSession.length, 1);
+      const { data } = createCalls.refreshSession[0];
+      assert.equal(data.userId, 'u1');
+      assert.match(data.tokenHash, /^[0-9a-f]{64}$/);
+      const ttlMs = data.expiresAt.getTime() - Date.now();
+      assert.ok(ttlMs > 6.9 * 24 * 60 * 60 * 1000, `expected ~7d TTL, got ${ttlMs}ms`);
     });
   });
 
@@ -234,7 +297,7 @@ describe('auth.service', () => {
       );
     });
 
-    it('hashes the new password and clears mustChangePassword on success', async () => {
+    it('hashes the new password, clears mustChangePassword, and revokes every outstanding refresh session', async () => {
       userRow = makeUser({ passwordHash: correctHash, mustChangePassword: true });
       const updated = await authService.changePassword('u1', 'correct-password', 'newlongpassword');
 
@@ -245,6 +308,9 @@ describe('auth.service', () => {
       assert.notEqual(call.data.passwordHash, correctHash);
       assert.equal(await argon2.verify(call.data.passwordHash as string, 'newlongpassword'), true);
       assert.equal(updated.mustChangePassword, false);
+
+      assert.equal(updateManyCalls.refreshSession.length, 1);
+      assert.deepEqual(updateManyCalls.refreshSession[0].where, { userId: 'u1', revokedAt: null });
     });
   });
 
@@ -325,7 +391,7 @@ describe('auth.service', () => {
       );
     });
 
-    it('hashes the new password and marks the token used inside a transaction on success', async () => {
+    it('hashes the new password, marks the token used inside a transaction, and revokes every outstanding refresh session', async () => {
       resetTokenRow = {
         id: 'prt1',
         userId: 'u1',
@@ -346,13 +412,16 @@ describe('auth.service', () => {
       const tokenCall = updateCalls.resetToken[0];
       assert.equal(tokenCall.where.id, 'prt1');
       assert.ok(tokenCall.data.usedAt instanceof Date);
+
+      assert.equal(updateManyCalls.refreshSession.length, 1);
+      assert.deepEqual(updateManyCalls.refreshSession[0].where, { userId: 'u1', revokedAt: null });
     });
   });
 
   describe('refresh', () => {
-    it('rejects a malformed refresh token with 401 (no Prisma call reached)', async () => {
+    it('rejects an unrecognized refresh token with 401 (no matching session)', async () => {
       await assert.rejects(
-        () => authService.refresh('not-a-real-jwt'),
+        () => authService.refresh('never-issued'),
         (err: unknown) => {
           assert.ok(err instanceof HttpError);
           assert.equal(err.status, 401);
@@ -362,10 +431,34 @@ describe('auth.service', () => {
       );
     });
 
-    it('rejects a valid token for a user that no longer exists with 401', async () => {
-      const token = signRefreshToken('ghost');
+    it('rejects an already-revoked session with 401', async () => {
+      refreshSessionRow = makeSession({ revokedAt: new Date() });
       await assert.rejects(
-        () => authService.refresh(token),
+        () => authService.refresh('some-token'),
+        (err: unknown) => {
+          assert.ok(err instanceof HttpError);
+          assert.equal(err.status, 401);
+          return true;
+        },
+      );
+    });
+
+    it('rejects an expired session with 401', async () => {
+      refreshSessionRow = makeSession({ expiresAt: new Date(Date.now() - 1000) });
+      await assert.rejects(
+        () => authService.refresh('some-token'),
+        (err: unknown) => {
+          assert.ok(err instanceof HttpError);
+          assert.equal(err.status, 401);
+          return true;
+        },
+      );
+    });
+
+    it('rejects a valid session for a user that no longer exists with 401', async () => {
+      refreshSessionRow = makeSession({ userId: 'ghost' });
+      await assert.rejects(
+        () => authService.refresh('some-token'),
         (err: unknown) => {
           assert.ok(err instanceof HttpError);
           assert.equal(err.status, 401);
@@ -375,11 +468,11 @@ describe('auth.service', () => {
       );
     });
 
-    it('rejects a valid token for an inactive user with 401', async () => {
+    it('rejects a valid session for an inactive user with 401', async () => {
       userRow = makeUser({ status: 'Suspended' });
-      const token = signRefreshToken('u1');
+      refreshSessionRow = makeSession();
       await assert.rejects(
-        () => authService.refresh(token),
+        () => authService.refresh('some-token'),
         (err: unknown) => {
           assert.ok(err instanceof HttpError);
           assert.equal(err.status, 401);
@@ -388,12 +481,31 @@ describe('auth.service', () => {
       );
     });
 
-    it('issues a fresh token pair for a valid token and an Active user', async () => {
+    it('rotates: revokes the used session and issues a fresh access/refresh token pair', async () => {
       userRow = makeUser();
-      const token = signRefreshToken('u1');
-      const result = await authService.refresh(token);
+      refreshSessionRow = makeSession();
+      const result = await authService.refresh('some-token');
+
       assert.equal(verifyAccessToken(result.accessToken).sub, 'u1');
-      assert.equal(verifyRefreshToken(result.refreshToken).sub, 'u1');
+      assert.match(result.refreshToken, /^[0-9a-f]{64}$/);
+
+      assert.equal(updateCalls.refreshSession.length, 1);
+      assert.equal(updateCalls.refreshSession[0].where.id, 'rts1');
+      assert.ok(updateCalls.refreshSession[0].data.revokedAt instanceof Date);
+
+      assert.equal(createCalls.refreshSession.length, 1);
+      assert.equal(createCalls.refreshSession[0].data.userId, 'u1');
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes the session matching the given refresh token', async () => {
+      await authService.logout('some-token');
+      assert.equal(updateManyCalls.refreshSession.length, 1);
+      const call = updateManyCalls.refreshSession[0];
+      assert.match(call.where.tokenHash as string, /^[0-9a-f]{64}$/);
+      assert.equal(call.where.revokedAt, null);
+      assert.ok(call.data.revokedAt instanceof Date);
     });
   });
 });
