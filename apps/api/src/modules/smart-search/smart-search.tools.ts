@@ -2,20 +2,52 @@ import { z } from 'zod';
 import {
   SystemRoleKey,
   absenceTypeSchema,
+  approvalQueueQuerySchema,
+  approvalQueueTabSchema,
   myRequestsQuerySchema,
   orgUsersQuerySchema,
+  projectStatus,
+  projectsQuerySchema,
   userStatus,
   type AbsenceEntryDto,
+  type ApprovalQueueItemDto,
+  type DepartmentDto,
+  type DepartmentsQuery,
+  type FrontDeskVisitorDto,
+  type HolidayDto,
+  type LeaveBalanceDto,
   type OrgUserDto,
+  type ProjectDto,
   type RequestListItemDto,
   type SmartSearchToolName,
 } from '@se/shared';
 import { HttpError } from '../../lib/http-error.js';
 import { listAbsences } from '../absences/absences.service.js';
 import type { Viewer } from '../requests/visibility-policy.js';
+import { listDepartments } from '../departments/departments.service.js';
+import { getTodayView } from '../front-desk/front-desk.service.js';
+import { listHolidays } from '../holidays/holidays.service.js';
+import { getMyLeaveBalances } from '../leave-balances/leave-balances.service.js';
 import { listOrgUsers } from '../org-users/org-users.service.js';
-import { listMyRequests } from '../requests/requests.service.js';
+import { listProjects } from '../projects/projects.service.js';
+import { listApprovalQueue, listMyRequests } from '../requests/requests.service.js';
 import { searchDirectoryUsers } from '../directory/directory.service.js';
+
+// Mirrors `ABSENCE_VIEWER_ROLES` in departments.routes.ts/projects.routes.ts verbatim — not
+// imported from there since neither file exports it, and both master lists share the same
+// read-access rule (open to whoever `resolveAbsenceScope` already grants absence visibility to).
+const DEPARTMENT_PROJECT_VIEWER_ROLES = [
+  SystemRoleKey.EnterpriseAdmin,
+  SystemRoleKey.HrHead,
+  SystemRoleKey.ProjectManager,
+  SystemRoleKey.TechLead,
+];
+
+// Mirrors `requireFrontDeskAccess` in front-desk.routes.ts verbatim — not imported since it's a
+// local middleware closure, not exported. Front-desk access is a permission on these two existing
+// roles, not a dedicated role (design.md, a PRD-locked decision), same two roles the Visitor
+// status model already gates check-in/out to.
+const FRONT_DESK_VIEWER_ROLES = [SystemRoleKey.EnterpriseAdmin, SystemRoleKey.HrHead];
 
 const rangeEnum = z.enum(['today', 'tomorrow', 'this_week', 'next_week', 'this_month', 'custom']);
 
@@ -142,6 +174,43 @@ function overlapsRange(row: RequestListItemDto, from: string, to: string): boole
   if (!row.startDate || !row.endDate) return false;
   return row.startDate.slice(0, 10) <= to && row.endDate.slice(0, 10) >= from;
 }
+
+export const queryDepartmentsArgsSchema = z.object({
+  search: nullishString,
+  archived: z.boolean().nullish().transform((v) => v ?? undefined),
+});
+export type QueryDepartmentsArgs = z.infer<typeof queryDepartmentsArgsSchema>;
+
+export const queryProjectsArgsSchema = z.object({
+  search: nullishString,
+  status: projectStatus.nullish().transform((v) => v ?? undefined),
+});
+export type QueryProjectsArgs = z.infer<typeof queryProjectsArgsSchema>;
+
+export const queryHolidaysArgsSchema = z.object({
+  // Nullish, not optional, same reasoning as every other tool's optional field in this file — the
+  // model fills an unset arg with explicit `null`, not by omitting the key.
+  year: z.number().int().nullish().transform((v) => v ?? undefined),
+});
+export type QueryHolidaysArgs = z.infer<typeof queryHolidaysArgsSchema>;
+
+// No args at all: this tool is always scoped to the viewer's own balances, so there's nothing for
+// the model to supply.
+export const queryMyLeaveBalancesArgsSchema = z.object({});
+export type QueryMyLeaveBalancesArgs = z.infer<typeof queryMyLeaveBalancesArgsSchema>;
+
+// No args: `getTodayView` always covers the tenant's current calendar day (IST) — there's nothing
+// for the model to supply.
+export const queryFrontDeskVisitorsArgsSchema = z.object({});
+export type QueryFrontDeskVisitorsArgs = z.infer<typeof queryFrontDeskVisitorsArgsSchema>;
+
+export const queryMyApprovalsArgsSchema = z.object({
+  // Defaults to "pending" (not left unset) since "what's pending my approval" is by far the more
+  // common phrasing — "what have I already approved/rejected" is the one case the model needs to
+  // actively supply "decided" for.
+  tab: approvalQueueTabSchema.nullish().transform((v) => v ?? 'pending'),
+});
+export type QueryMyApprovalsArgs = z.infer<typeof queryMyApprovalsArgsSchema>;
 
 /**
  * The registry entry shape all tools are stored as once erased to a common type — `defineTool`
@@ -303,6 +372,141 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
         rows = rows.filter((row) => overlapsRange(row, from, to));
       }
       return rows;
+    },
+  }),
+  defineTool<QueryDepartmentsArgs>({
+    name: 'queryDepartments',
+    description:
+      'Answers questions about the tenant\'s DEPARTMENT master list — names, heads, member counts, and archived state (e.g. "what departments do we have?", "who heads Engineering?", "is Sales archived?"). NOT for who is on leave/WFH within a department (queryAbsences) or who belongs to it beyond its head (queryUsers with departmentId). Enterprise Admin, HR Head, Project Manager, or Tech Lead only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Free-text match against department name.' },
+        archived: {
+          type: 'boolean',
+          description: 'Optional filter: true for archived only, false for active only. Omit for both.',
+        },
+      },
+      required: [],
+    },
+    argsSchema: queryDepartmentsArgsSchema,
+    execute: async (tenantId, viewer, args): Promise<DepartmentDto[]> => {
+      // `listDepartments` itself enforces no permission check (today it's gated only by the
+      // `requireAnyRole(ABSENCE_VIEWER_ROLES)` Express middleware on the REST route) — so the tool
+      // executor adds the same check explicitly before touching any data.
+      if (!DEPARTMENT_PROJECT_VIEWER_ROLES.some((role) => viewer.roles.includes(role))) {
+        throw new HttpError(403, 'Enterprise Admin, HR Head, Project Manager, or Tech Lead access required');
+      }
+      const query: DepartmentsQuery = {
+        page: 1,
+        pageSize: 25, // capped so the narration prompt and any rendered table stay small
+        search: args.search,
+        archived: args.archived,
+      };
+      const result = await listDepartments(tenantId, query);
+      return result.rows;
+    },
+  }),
+  defineTool<QueryProjectsArgs>({
+    name: 'queryProjects',
+    description:
+      'Answers questions about the tenant\'s PROJECT master list — names, status (active/archived), PM, Tech Lead, and members (e.g. "what projects are active?", "who is the PM for Project Phoenix?"). NOT for who is on leave/WFH on a project (queryAbsences) or approvals awaiting the viewer (queryMyApprovals). Enterprise Admin, HR Head, Project Manager, or Tech Lead only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Free-text match against project name.' },
+        status: {
+          type: 'string',
+          enum: ['active', 'archived'],
+          description: 'Optional filter by project status. Omit for both.',
+        },
+      },
+      required: [],
+    },
+    argsSchema: queryProjectsArgsSchema,
+    execute: async (tenantId, viewer, args): Promise<ProjectDto[]> => {
+      // Same reasoning as queryDepartments above: `listProjects` enforces no check of its own, so
+      // the executor mirrors the REST route's `requireAnyRole(ABSENCE_VIEWER_ROLES)` gate here.
+      if (!DEPARTMENT_PROJECT_VIEWER_ROLES.some((role) => viewer.roles.includes(role))) {
+        throw new HttpError(403, 'Enterprise Admin, HR Head, Project Manager, or Tech Lead access required');
+      }
+      const query = projectsQuerySchema.parse({ page: 1, pageSize: 25, search: args.search, status: args.status });
+      const result = await listProjects(tenantId, query);
+      return result.rows;
+    },
+  }),
+  defineTool<QueryHolidaysArgs>({
+    name: 'queryHolidays',
+    description:
+      'Answers questions about the tenant\'s configured HOLIDAY calendar for a given year (e.g. "what holidays do we have this year?", "is there a holiday next month?"). NOT about staff leave/WFH (queryAbsences) or the viewer\'s own requests (queryMyRequests). Available to any authenticated user — holidays are visible tenant-wide, no role restriction.',
+    parameters: {
+      type: 'object',
+      properties: {
+        year: { type: 'number', description: 'Calendar year, e.g. 2026. Omit for the current year.' },
+      },
+      required: [],
+    },
+    argsSchema: queryHolidaysArgsSchema,
+    execute: async (tenantId, _viewer, args): Promise<HolidayDto[]> => {
+      // No permission gate: `holidays.routes.ts` leaves GET open to any authenticated user.
+      const year = args.year ?? new Date().getFullYear();
+      return listHolidays(tenantId, year);
+    },
+  }),
+  defineTool<QueryMyLeaveBalancesArgs>({
+    name: 'queryMyLeaveBalances',
+    description:
+      "Answers questions about the VIEWER'S OWN remaining or used leave balance per leave type (e.g. \"how many leave days do I have left?\", \"what's my sick leave balance?\"). ONLY for the viewer's own balance — never a colleague's (no tool answers that). Available to any authenticated user, no role restriction.",
+    parameters: { type: 'object', properties: {}, required: [] },
+    argsSchema: queryMyLeaveBalancesArgsSchema,
+    execute: async (tenantId, viewer): Promise<LeaveBalanceDto[]> => {
+      // Self-scoped by `userId` inside `getMyLeaveBalances` itself — no permission check needed,
+      // same reasoning as queryMyRequests (seeing your own data is never a 403 case).
+      return getMyLeaveBalances(tenantId, viewer.id);
+    },
+  }),
+  defineTool<QueryMyApprovalsArgs>({
+    name: 'queryMyApprovals',
+    description:
+      "Answers questions about requests awaiting the VIEWER'S OWN approval decision, or ones they've already approved/rejected (e.g. \"what's pending my approval?\", \"what have I approved recently?\"). ONLY for the viewer's own approver queue — for a colleague's request status use queryAbsences, and for the viewer's OWN submitted requests (the opposite direction — things they submitted, not things they need to decide on) use queryMyRequests instead, never this tool. Available to any authenticated user, no role restriction.",
+    parameters: {
+      type: 'object',
+      properties: {
+        tab: {
+          type: 'string',
+          enum: ['pending', 'decided'],
+          description: 'Which queue to show: "pending" (awaiting the viewer\'s decision) or "decided" (already acted on). Defaults to "pending".',
+        },
+      },
+      required: [],
+    },
+    argsSchema: queryMyApprovalsArgsSchema,
+    execute: async (tenantId, viewer, args): Promise<ApprovalQueueItemDto[]> => {
+      // Self-scoped by `approverId` inside `listApprovalQueue` itself — no permission check needed,
+      // same reasoning as queryMyRequests/queryMyLeaveBalances.
+      const query = approvalQueueQuerySchema.parse({ tab: args.tab });
+      const result = await listApprovalQueue(tenantId, viewer.id, query);
+      return result.rows;
+    },
+  }),
+  defineTool<QueryFrontDeskVisitorsArgs>({
+    name: 'queryFrontDeskVisitors',
+    description:
+      "Answers questions about TODAY's visitors at the front desk — who is expected, currently on-site, or already checked out, including their host and purpose (e.g. \"who's checked in right now?\", \"who's visiting today?\"). NOT for the viewer's own visitor request status (queryMyRequests) or a colleague's leave/WFH (queryAbsences). Enterprise Admin or HR Head only — the same two roles the Front Desk console itself is restricted to.",
+    parameters: { type: 'object', properties: {}, required: [] },
+    argsSchema: queryFrontDeskVisitorsArgsSchema,
+    execute: async (tenantId, viewer): Promise<FrontDeskVisitorDto[]> => {
+      // `getTodayView` itself enforces no permission check (today it's gated only by the
+      // `requireFrontDeskAccess` Express middleware on the REST route) — so the tool executor adds
+      // the same check explicitly before touching any data, same pattern as queryDepartments/queryProjects.
+      if (!FRONT_DESK_VIEWER_ROLES.some((role) => viewer.roles.includes(role))) {
+        throw new HttpError(403, 'Enterprise Admin or HR Head access required');
+      }
+      const { expected, onSite, checkedOut } = await getTodayView(tenantId);
+      // Flattened into one array (this tool's only deviation from the raw REST shape, which splits
+      // by lifecycle bucket): every row already carries `status`/`checkInAt`/`checkOutAt`, enough
+      // for narration to state which bucket a visitor is in without a second, bucket-picking arg.
+      return [...expected, ...onSite, ...checkedOut];
     },
   }),
 ];

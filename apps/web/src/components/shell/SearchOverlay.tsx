@@ -1,7 +1,18 @@
 import * as React from 'react';
 import { Search, Send } from 'lucide-react';
-import type { AbsenceEntryDto, OrgUserDto, RequestListItemDto } from '@se/shared';
-import { ABSENCE_TYPE_META, dateFromDay, formatDateRangeShort } from '@/components/absences/absenceStyle';
+import type {
+  AbsenceEntryDto,
+  ApprovalQueueItemDto,
+  DepartmentDto,
+  FrontDeskVisitorDto,
+  HolidayDto,
+  LeaveBalanceDto,
+  OrgUserDto,
+  ProjectDto,
+  RequestListItemDto,
+} from '@se/shared';
+import { ABSENCE_TYPE_META, dateFromDay, formatDateRangeShort, formatDateShort } from '@/components/absences/absenceStyle';
+import { STATUS_STYLE } from '@/pages/organization/Projects';
 import { StatusBadge, TypeTile, requestTypeMeta } from '@/pages/requests/shared';
 import { askSmartSearch, type SmartSearchHistoryMessage, type SmartSearchResponse } from '@/lib/api';
 
@@ -115,11 +126,200 @@ function MyRequestRows({ rows }: { rows: RequestListItemDto[] }) {
   );
 }
 
+function DepartmentRows({ rows }: { rows: DepartmentDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[420px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Name</th>
+            <th className="px-3 py-2">Head(s)</th>
+            <th className="px-3 py-2">Members</th>
+            <th className="px-3 py-2">Archived</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d) => (
+            <tr key={d.id} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">{d.name}</td>
+              <td className="px-3 py-2">{d.heads.map((h) => h.name).join(', ') || '—'}</td>
+              <td className="px-3 py-2">{d.memberCount}</td>
+              <td className="px-3 py-2">{d.archived ? 'Yes' : 'No'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ProjectRows({ rows }: { rows: ProjectDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[460px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Name</th>
+            <th className="px-3 py-2">PM</th>
+            <th className="px-3 py-2">Tech Lead</th>
+            <th className="px-3 py-2">Members</th>
+            <th className="px-3 py-2">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => {
+            const status = STATUS_STYLE[p.status];
+            return (
+              <tr key={p.id} className="border-b border-line-soft text-ink-700 last:border-b-0">
+                <td className="px-3 py-2 font-semibold text-ink-900">{p.name}</td>
+                <td className="px-3 py-2">{p.pm?.name ?? '—'}</td>
+                <td className="px-3 py-2">{p.techLead?.name ?? '—'}</td>
+                <td className="px-3 py-2">{p.memberCount}</td>
+                <td className="px-3 py-2">
+                  <span
+                    className="inline-flex items-center gap-[6px] rounded-full py-1 pl-[10px] pr-[10px] text-xs font-medium"
+                    style={{ background: status.bg, color: status.fg }}
+                  >
+                    <span className="h-[6px] w-[6px] flex-none rounded-full" style={{ background: status.dot }} />
+                    {status.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function HolidayRows({ rows }: { rows: HolidayDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[280px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Date</th>
+            <th className="px-3 py-2">Name</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((h) => (
+            <tr key={h.id} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">{formatDateShort(h.date)}</td>
+              <td className="px-3 py-2">{h.name}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LeaveBalanceRows({ rows }: { rows: LeaveBalanceDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[360px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Leave Type</th>
+            <th className="px-3 py-2">Used</th>
+            <th className="px-3 py-2">Total</th>
+            <th className="px-3 py-2">Remaining</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((b) => (
+            <tr key={b.leaveTypeId} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">{b.leaveTypeName}</td>
+              <td className="px-3 py-2">{b.used}</td>
+              <td className="px-3 py-2">{b.total}</td>
+              <td className="px-3 py-2">{b.total - b.used}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MyApprovalRows({ rows }: { rows: ApprovalQueueItemDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[420px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Requester</th>
+            <th className="px-3 py-2">Request</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2">Submitted</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((a) => (
+            <tr key={a.requestId} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">{a.requesterName}</td>
+              <td className="px-3 py-2">{a.formTitle}</td>
+              <td className="px-3 py-2">
+                <StatusBadge status={a.status} />
+              </td>
+              <td className="px-3 py-2">{formatDateShort(a.submittedAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FrontDeskRows({ rows }: { rows: FrontDeskVisitorDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[440px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Visitor</th>
+            <th className="px-3 py-2">Mobile</th>
+            <th className="px-3 py-2">Host</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2">Checked in</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((v) => (
+            <tr key={v.requestId} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">{v.visitorName}</td>
+              <td className="px-3 py-2">{v.mobile}</td>
+              <td className="px-3 py-2">{v.hostName}</td>
+              <td className="px-3 py-2">
+                <StatusBadge status={v.status} />
+              </td>
+              <td className="px-3 py-2">{v.checkInAt ? formatDateShort(v.checkInAt) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function MessageRows({ message }: { message: ChatMessage }) {
   if (message.role !== 'assistant' || !message.rows || message.rows.length === 0) return null;
   if (message.toolUsed === 'queryAbsences') return <AbsenceRows rows={message.rows} />;
   if (message.toolUsed === 'queryUsers') return <UserRows rows={message.rows} />;
   if (message.toolUsed === 'queryMyRequests') return <MyRequestRows rows={message.rows} />;
+  if (message.toolUsed === 'queryDepartments') return <DepartmentRows rows={message.rows} />;
+  if (message.toolUsed === 'queryProjects') return <ProjectRows rows={message.rows} />;
+  if (message.toolUsed === 'queryHolidays') return <HolidayRows rows={message.rows} />;
+  if (message.toolUsed === 'queryMyLeaveBalances') return <LeaveBalanceRows rows={message.rows} />;
+  if (message.toolUsed === 'queryMyApprovals') return <MyApprovalRows rows={message.rows} />;
+  if (message.toolUsed === 'queryFrontDeskVisitors') return <FrontDeskRows rows={message.rows} />;
   return null;
 }
 
@@ -207,7 +407,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
           </span>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[14px] font-semibold text-ink-900">Smart Search</div>
-            <div className="truncate text-[12px] text-ink-400">Ask about staff leave/WFH, the user directory, or your own requests</div>
+            <div className="truncate text-[12px] text-ink-400">Ask about leave/WFH, directory, departments, projects, holidays, requests, balances, approvals, or visitors</div>
           </div>
           <span
             className="cursor-pointer rounded-md border border-line px-[7px] py-[3px] text-[11px] font-semibold text-ink-400"
@@ -220,7 +420,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
         <div ref={listRef} className="max-h-[420px] min-h-[160px] overflow-y-auto px-[18px] py-4">
           {messages.length === 0 && !pending && (
             <div className="px-[18px] py-8 text-center text-[13px] text-ink-400">
-              Ask a question about staff leave/WFH, the user directory, or your own requests to get started.
+              Ask a question about leave/WFH, the directory, departments, projects, holidays, your requests, balances, approvals, or visitors to get started.
             </div>
           )}
           <div className="flex flex-col gap-3">
@@ -261,7 +461,7 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
           <textarea
             ref={textareaRef}
             rows={1}
-            placeholder="Ask about leave, WFH, the user directory, or your own requests…"
+            placeholder="Ask about leave, WFH, departments, projects, holidays, or your own requests…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

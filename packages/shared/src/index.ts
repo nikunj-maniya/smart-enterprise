@@ -1307,55 +1307,6 @@ export type AbsenceCapDto = z.infer<typeof absenceCapDtoSchema>;
 export const updateAbsenceCapRequestSchema = z.object({ cap: z.number().int().min(1) });
 export type UpdateAbsenceCapRequest = z.infer<typeof updateAbsenceCapRequestSchema>;
 
-// ── Smart Search (smart-search, tool-calling LLM assistant, tenant-scoped) ──
-export const smartSearchChatMessageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
-  content: z.string().min(1).max(4000),
-});
-export type SmartSearchChatMessage = z.infer<typeof smartSearchChatMessageSchema>;
-
-/** `history` is the prior turns of the same thread; the server trims it to a small recent
- *  window before sending it to the model — this cap is just a request-size guardrail. */
-export const smartSearchRequestSchema = z.object({
-  message: z.string().min(1).max(4000),
-  history: z.array(smartSearchChatMessageSchema).max(20).optional(),
-});
-export type SmartSearchRequest = z.infer<typeof smartSearchRequestSchema>;
-
-export const smartSearchToolNameSchema = z.enum(['queryAbsences', 'queryUsers', 'queryMyRequests']);
-export type SmartSearchToolName = z.infer<typeof smartSearchToolNameSchema>;
-
-/** `toolUsed` is `null` when the model matched no tool (declined) or named an unrecognized one.
- *  `denied` is true only when a matched tool's executor rejected the viewer for permission — in
- *  that case `rows` is always empty regardless of which tool was involved. */
-export const smartSearchResponseSchema = z.discriminatedUnion('toolUsed', [
-  z.object({
-    reply: z.string(),
-    toolUsed: z.literal('queryAbsences'),
-    denied: z.boolean(),
-    rows: z.array(absenceEntryDtoSchema),
-  }),
-  z.object({
-    reply: z.string(),
-    toolUsed: z.literal('queryUsers'),
-    denied: z.boolean(),
-    rows: z.array(orgUserSchema),
-  }),
-  z.object({
-    reply: z.string(),
-    toolUsed: z.literal('queryMyRequests'),
-    denied: z.boolean(),
-    rows: z.array(requestListItemSchema),
-  }),
-  z.object({
-    reply: z.string(),
-    toolUsed: z.literal(null),
-    denied: z.boolean(),
-    rows: z.tuple([]),
-  }),
-]);
-export type SmartSearchResponse = z.infer<typeof smartSearchResponseSchema>;
-
 // ── Slack Integration (slack-integration, tenant-scoped, Enterprise Admin only, PRD §11) ──
 export const slackConfigStatusSchema = z.enum(['disconnected', 'connected', 'error']);
 export type SlackConfigStatus = z.infer<typeof slackConfigStatusSchema>;
@@ -1508,6 +1459,105 @@ export const holidayDtoSchema = z.object({
   name: z.string(),
 });
 export type HolidayDto = z.infer<typeof holidayDtoSchema>;
+
+// ── Smart Search (smart-search, tool-calling LLM assistant, tenant-scoped) ──
+// Placed here, after departmentSchema/projectSchema/leaveBalanceDtoSchema/approvalQueueItemSchema/
+// holidayDtoSchema, rather than near the module's other conversational-assistant types: the
+// response union below references all of them directly, and they're `const`-declared, so
+// referencing them before this point would throw (temporal dead zone).
+export const smartSearchChatMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().min(1).max(4000),
+});
+export type SmartSearchChatMessage = z.infer<typeof smartSearchChatMessageSchema>;
+
+/** `history` is the prior turns of the same thread; the server trims it to a small recent
+ *  window before sending it to the model — this cap is just a request-size guardrail. */
+export const smartSearchRequestSchema = z.object({
+  message: z.string().min(1).max(4000),
+  history: z.array(smartSearchChatMessageSchema).max(20).optional(),
+});
+export type SmartSearchRequest = z.infer<typeof smartSearchRequestSchema>;
+
+export const smartSearchToolNameSchema = z.enum([
+  'queryAbsences',
+  'queryUsers',
+  'queryMyRequests',
+  'queryDepartments',
+  'queryProjects',
+  'queryHolidays',
+  'queryMyLeaveBalances',
+  'queryMyApprovals',
+  'queryFrontDeskVisitors',
+]);
+export type SmartSearchToolName = z.infer<typeof smartSearchToolNameSchema>;
+
+/** `toolUsed` is `null` when the model matched no tool (declined) or named an unrecognized one.
+ *  `denied` is true only when a matched tool's executor rejected the viewer for permission — in
+ *  that case `rows` is always empty regardless of which tool was involved. */
+export const smartSearchResponseSchema = z.discriminatedUnion('toolUsed', [
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryAbsences'),
+    denied: z.boolean(),
+    rows: z.array(absenceEntryDtoSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryUsers'),
+    denied: z.boolean(),
+    rows: z.array(orgUserSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryMyRequests'),
+    denied: z.boolean(),
+    rows: z.array(requestListItemSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryDepartments'),
+    denied: z.boolean(),
+    rows: z.array(departmentSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryProjects'),
+    denied: z.boolean(),
+    rows: z.array(projectSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryHolidays'),
+    denied: z.boolean(),
+    rows: z.array(holidayDtoSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryMyLeaveBalances'),
+    denied: z.boolean(),
+    rows: z.array(leaveBalanceDtoSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryMyApprovals'),
+    denied: z.boolean(),
+    rows: z.array(approvalQueueItemSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryFrontDeskVisitors'),
+    denied: z.boolean(),
+    rows: z.array(frontDeskVisitorDtoSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal(null),
+    denied: z.boolean(),
+    rows: z.tuple([]),
+  }),
+]);
+export type SmartSearchResponse = z.infer<typeof smartSearchResponseSchema>;
 
 export const attendanceReportQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Expected YYYY-MM'),

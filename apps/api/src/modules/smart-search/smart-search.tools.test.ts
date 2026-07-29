@@ -1,7 +1,27 @@
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import {
+  SystemRoleKey,
+  type ApprovalQueueItemDto,
+  type DepartmentDto,
+  type FrontDeskVisitorDto,
+  type HolidayDto,
+  type LeaveBalanceDto,
+  type ProjectDto,
+} from '@se/shared';
+import { prisma } from '../../prisma.js';
 import { redisConnection } from '../../lib/redis.js';
-import { queryAbsencesArgsSchema, resolveDateRange } from './smart-search.tools.js';
+import { HttpError } from '../../lib/http-error.js';
+import type { Viewer } from '../requests/visibility-policy.js';
+import {
+  queryAbsencesArgsSchema,
+  queryDepartmentsArgsSchema,
+  queryHolidaysArgsSchema,
+  queryMyApprovalsArgsSchema,
+  queryProjectsArgsSchema,
+  resolveDateRange,
+  SMART_SEARCH_TOOLS,
+} from './smart-search.tools.js';
 
 // smart-search.tools.js transitively imports the BullMQ `redisConnection` (via queryMyRequests ->
 // requests.service.js -> notifications.service.js -> slack-delivery.js), which connects eagerly
@@ -78,5 +98,337 @@ describe('queryAbsencesArgsSchema', () => {
 
   it('rejects an unrecognized range value', () => {
     assert.equal(queryAbsencesArgsSchema.safeParse({ range: 'last_year' }).success, false);
+  });
+});
+
+function viewer(id: string, roles: string[]): Viewer {
+  return { id, roles };
+}
+
+const EMPLOYEE = viewer('emp1', [SystemRoleKey.Employee]);
+
+describe('queryDepartments', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryDepartments')!;
+  let departmentRows: { id: string; name: string; archived: boolean; heads: never[]; _count: { users: number } }[] = [];
+
+  Object.defineProperty(prisma, 'department', {
+    value: {
+      findMany: async () => departmentRows,
+      count: async () => departmentRows.length,
+    },
+    configurable: true,
+  });
+
+  beforeEach(() => {
+    departmentRows = [];
+  });
+
+  it('an Employee (none of the Enterprise Admin/HR Head/PM/Tech Lead roles) is denied with HttpError(403)', async () => {
+    await assert.rejects(
+      () => tool.execute('t1', EMPLOYEE, { search: undefined, archived: undefined }),
+      (err: unknown) => err instanceof HttpError && err.status === 403,
+    );
+  });
+
+  it('a Tech Lead (one of the allowed roles) gets real rows', async () => {
+    departmentRows = [{ id: 'd1', name: 'Engineering', archived: false, heads: [], _count: { users: 3 } }];
+    const techLead = viewer('tl1', [SystemRoleKey.TechLead]);
+    const rows = (await tool.execute('t1', techLead, { search: undefined, archived: undefined })) as DepartmentDto[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, 'Engineering');
+  });
+});
+
+describe('queryDepartmentsArgsSchema', () => {
+  it('normalizes an explicit null (model-supplied unset arg) to undefined', () => {
+    const result = queryDepartmentsArgsSchema.parse({ search: null, archived: null });
+    assert.equal(result.search, undefined);
+    assert.equal(result.archived, undefined);
+  });
+
+  it('passes a real boolean archived value through untouched', () => {
+    assert.equal(queryDepartmentsArgsSchema.parse({ archived: true }).archived, true);
+  });
+});
+
+describe('queryProjects', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryProjects')!;
+  let projectRows: { id: string; name: string; status: string; members: never[] }[] = [];
+
+  Object.defineProperty(prisma, 'project', {
+    value: {
+      findMany: async () => projectRows,
+      count: async () => projectRows.length,
+    },
+    configurable: true,
+  });
+
+  beforeEach(() => {
+    projectRows = [];
+  });
+
+  it('an Employee is denied with HttpError(403)', async () => {
+    await assert.rejects(
+      () => tool.execute('t1', EMPLOYEE, { search: undefined, status: undefined }),
+      (err: unknown) => err instanceof HttpError && err.status === 403,
+    );
+  });
+
+  it('a Project Manager (one of the allowed roles) gets real rows', async () => {
+    projectRows = [{ id: 'p1', name: 'Project Phoenix', status: 'active', members: [] }];
+    const pm = viewer('pm1', [SystemRoleKey.ProjectManager]);
+    const rows = (await tool.execute('t1', pm, { search: undefined, status: undefined })) as ProjectDto[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, 'Project Phoenix');
+  });
+});
+
+describe('queryProjectsArgsSchema', () => {
+  it('normalizes an explicit null status to undefined', () => {
+    assert.equal(queryProjectsArgsSchema.parse({ search: null, status: null }).status, undefined);
+  });
+
+  it('rejects a status outside the active/archived enum', () => {
+    assert.equal(queryProjectsArgsSchema.safeParse({ status: 'deleted' }).success, false);
+  });
+});
+
+describe('queryHolidays', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryHolidays')!;
+  let holidayRows: { id: string; date: Date; name: string }[] = [];
+  let lastWhere: { date: { gte: Date; lt: Date } } | undefined;
+
+  Object.defineProperty(prisma, 'holiday', {
+    value: {
+      findMany: async (args: { where: { date: { gte: Date; lt: Date } } }) => {
+        lastWhere = args.where;
+        return holidayRows;
+      },
+    },
+    configurable: true,
+  });
+
+  beforeEach(() => {
+    holidayRows = [];
+    lastWhere = undefined;
+  });
+
+  it('an Employee (no special role) gets real rows — no permission check exists for holidays', async () => {
+    holidayRows = [{ id: 'h1', date: new Date('2026-01-26T00:00:00.000Z'), name: 'Republic Day' }];
+    const rows = (await tool.execute('t1', EMPLOYEE, { year: undefined })) as HolidayDto[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, 'Republic Day');
+  });
+
+  it('omitting year defaults to the current calendar year, not a hardcoded one', async () => {
+    await tool.execute('t1', EMPLOYEE, { year: undefined });
+    assert.equal(lastWhere!.date.gte.getUTCFullYear(), new Date().getFullYear());
+  });
+
+  it('an explicit year is passed through instead of the current year', async () => {
+    await tool.execute('t1', EMPLOYEE, { year: 2020 });
+    assert.equal(lastWhere!.date.gte.getUTCFullYear(), 2020);
+  });
+});
+
+describe('queryHolidaysArgsSchema', () => {
+  it('normalizes an explicit null year (model-supplied unset arg) to undefined', () => {
+    assert.equal(queryHolidaysArgsSchema.parse({ year: null }).year, undefined);
+  });
+
+  it('accepts an explicit year', () => {
+    assert.equal(queryHolidaysArgsSchema.parse({ year: 2027 }).year, 2027);
+  });
+});
+
+describe('queryMyLeaveBalances', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryMyLeaveBalances')!;
+  let leaveBalanceRows: { leaveType: { id: string; name: string; quota: number }; balance: number }[] = [];
+  let lastWhere: { userId: string } | undefined;
+
+  Object.defineProperty(prisma, 'leaveBalance', {
+    value: {
+      findMany: async (args: { where: { userId: string } }) => {
+        lastWhere = args.where;
+        return leaveBalanceRows;
+      },
+    },
+    configurable: true,
+  });
+
+  beforeEach(() => {
+    leaveBalanceRows = [];
+    lastWhere = undefined;
+  });
+
+  it('an Employee gets their own balance rows — no role check exists for viewing your own balance', async () => {
+    leaveBalanceRows = [{ leaveType: { id: 'lt1', name: 'Sick Leave', quota: 10 }, balance: 7 }];
+    const rows = (await tool.execute('t1', EMPLOYEE, {})) as LeaveBalanceDto[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].used, 3);
+  });
+
+  it('scopes the query to the viewer\'s own userId, never a supplied one', async () => {
+    const someoneElse = viewer('e42', []);
+    await tool.execute('t1', someoneElse, {});
+    assert.equal(lastWhere!.userId, 'e42');
+  });
+});
+
+describe('queryMyApprovals', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryMyApprovals')!;
+  type ApproverRow = {
+    decision: string | null;
+    approverId: string;
+    roleContext: string | null;
+    comment: string | null;
+    escalatedFromId: string | null;
+    escalationCause: string | null;
+    request: {
+      id: string;
+      form: { key: string; title: string };
+      requester: { id: string; name: string; jobTitle: string | null };
+      startDate: Date | null;
+      endDate: Date | null;
+      createdAt: Date;
+      status: string;
+      overBalance: boolean | null;
+      specialConditionFlagged: boolean | null;
+      approvers: ApproverRow[];
+    };
+  };
+  let approverRows: ApproverRow[] = [];
+  let lastWhere: { approverId: string } | undefined;
+
+  function approverRow(): ApproverRow {
+    const chain: ApproverRow = {
+      decision: 'pending',
+      approverId: 'approver-9',
+      roleContext: null,
+      comment: null,
+      escalatedFromId: null,
+      escalationCause: null,
+      request: {
+        id: 'req-1',
+        form: { key: 'leave', title: 'Leave' },
+        requester: { id: 'req1', name: 'Requester One', jobTitle: null },
+        startDate: null,
+        endDate: null,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        status: 'Pending Approval',
+        overBalance: null,
+        specialConditionFlagged: null,
+        approvers: [],
+      },
+    };
+    chain.request.approvers = [chain];
+    return chain;
+  }
+
+  Object.defineProperty(prisma, 'requestApprover', {
+    value: {
+      count: async () => approverRows.length,
+      findMany: async (args: { where: { approverId: string } }) => {
+        lastWhere = args.where;
+        return approverRows;
+      },
+    },
+    configurable: true,
+  });
+  Object.defineProperty(prisma, 'user', {
+    value: { findMany: async () => [] },
+    configurable: true,
+  });
+
+  beforeEach(() => {
+    approverRows = [];
+    lastWhere = undefined;
+  });
+
+  it('an Employee gets their own pending approvals — no role check exists', async () => {
+    approverRows = [approverRow()];
+    const rows = (await tool.execute('t1', EMPLOYEE, { tab: 'pending' })) as ApprovalQueueItemDto[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].requestId, 'req-1');
+  });
+
+  it('scopes the query to the viewer as approverId, never a supplied one', async () => {
+    const approver = viewer('approver-42', []);
+    await tool.execute('t1', approver, { tab: 'pending' });
+    assert.equal(lastWhere!.approverId, 'approver-42');
+  });
+});
+
+describe('queryMyApprovalsArgsSchema', () => {
+  it('defaults tab to "pending" when omitted', () => {
+    assert.equal(queryMyApprovalsArgsSchema.parse({}).tab, 'pending');
+  });
+
+  it('defaults tab to "pending" when explicitly null (model-supplied unset arg)', () => {
+    assert.equal(queryMyApprovalsArgsSchema.parse({ tab: null }).tab, 'pending');
+  });
+
+  it('accepts an explicit "decided" tab', () => {
+    assert.equal(queryMyApprovalsArgsSchema.parse({ tab: 'decided' }).tab, 'decided');
+  });
+});
+
+describe('queryFrontDeskVisitors', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryFrontDeskVisitors')!;
+  type RequestRow = {
+    id: string;
+    payload: Record<string, unknown>;
+    startDate: Date | null;
+    status: string;
+    visitor: { checkInAt: Date | null; checkOutAt: Date | null } | null;
+  };
+  let requestRows: RequestRow[] = [];
+
+  Object.defineProperty(prisma, 'request', {
+    value: { findMany: async () => requestRows },
+    configurable: true,
+  });
+  // Last `prisma.user` mock in this file wins for every describe block above too (Object.defineProperty
+  // calls all run synchronously at registration time, before any `it` runs) — harmless here since none
+  // of queryMyApprovals's assertions depend on the actual host/approver names it resolves.
+  Object.defineProperty(prisma, 'user', {
+    value: { findMany: async () => [{ id: 'host-1', name: 'Hank Host' }] },
+    configurable: true,
+  });
+
+  beforeEach(() => {
+    requestRows = [];
+  });
+
+  it('an Employee (neither Enterprise Admin nor HR Head) is denied with HttpError(403)', async () => {
+    await assert.rejects(
+      () => tool.execute('t1', EMPLOYEE, {}),
+      (err: unknown) => err instanceof HttpError && err.status === 403,
+    );
+  });
+
+  it("an HR Head gets today's visitors, flattened across expected/on-site/checked-out", async () => {
+    requestRows = [
+      {
+        id: 'req-expected',
+        payload: { visitor_name: 'Vera Visitor', mobile: '9999999999', whom_to_meet: 'host-1', purpose: 'Demo' },
+        startDate: new Date(),
+        status: 'Approved',
+        visitor: null,
+      },
+      {
+        id: 'req-onsite',
+        payload: { visitor_name: 'Otto Onsite', mobile: '8888888888', whom_to_meet: 'host-1', purpose: 'Meeting' },
+        startDate: new Date(),
+        status: 'Checked-In',
+        visitor: { checkInAt: new Date(), checkOutAt: null },
+      },
+    ];
+    const hrHead = viewer('hr1', [SystemRoleKey.HrHead]);
+    const rows = (await tool.execute('t1', hrHead, {})) as FrontDeskVisitorDto[];
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].visitorName, 'Vera Visitor');
+    assert.equal(rows[0].hostName, 'Hank Host');
+    assert.equal(rows[1].checkInAt !== null, true);
   });
 });
