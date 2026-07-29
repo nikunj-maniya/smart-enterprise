@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { CheckCircle2, Send, TriangleAlert } from 'lucide-react';
 import { isFieldVisible, type FormDefinitionDto, type LeaveBalanceDto, type RequestDto, type StageRules } from '@se/shared';
 import { Button } from '@/components/ui/button';
+import { Toast, useToast } from '@/components/ui/toast';
 import { FormRenderer } from '@/components/form-engine/FormRenderer';
 import { useFormEngine } from '@/components/form-engine/useFormEngine';
 import { definitionFromDto } from '@/components/form-engine/definition';
@@ -59,7 +60,7 @@ function RequestFormCard({ dto, onCancel }: { dto: FormDefinitionDto; onCancel: 
   const definition = React.useMemo(() => definitionFromDto(dto), [dto]);
   const engine = useFormEngine(definition);
   const [submitting, setSubmitting] = React.useState(false);
-  const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const toast = useToast();
   const [submitted, setSubmitted] = React.useState<RequestDto | null>(null);
   const [leaveBalances, setLeaveBalances] = React.useState<LeaveBalanceDto[] | null>(null);
 
@@ -84,15 +85,23 @@ function RequestFormCard({ dto, onCancel }: { dto: FormDefinitionDto; onCancel: 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitError(null);
     setSubmitting(true);
     try {
       // `submit()` returns the created request on success, or `null` when validation
       // fails (client-side or a server 400) — in which case `engine.errors` is already set.
       const result = await engine.submit();
-      if (result) setSubmitted(result);
-    } catch {
-      setSubmitError('Something went wrong submitting your request. Please try again.');
+      if (result) {
+        setSubmitted(result);
+        toast.show('Request submitted successfully.');
+      }
+    } catch (err) {
+      // apiFetch always resolves an ApiError with a usable message — the server's own, or its
+      // own `Request failed (status)` fallback — so only a non-ApiError (network/JS) failure
+      // ever needs the local generic copy here.
+      toast.show(
+        err instanceof ApiError ? err.message : 'Something went wrong submitting your request. Please try again.',
+        'error',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -100,66 +109,67 @@ function RequestFormCard({ dto, onCancel }: { dto: FormDefinitionDto; onCancel: 
 
   if (submitted) {
     return (
-      <div className="mt-[14px] rounded-xl border border-line-soft bg-surface p-7 text-center shadow-card">
-        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(236,245,246)] text-brand">
-          <CheckCircle2 size={26} />
-        </span>
-        <div className="mt-4 text-[20px] font-bold text-ink-900">Request submitted</div>
-        <div className="mt-2 text-sm text-ink-400">
-          Your {definition.title} request has been submitted and routed for approval.
+      <>
+        <Toast message={toast.message} variant={toast.variant} />
+        <div className="mt-[14px] rounded-xl border border-line-soft bg-surface p-7 text-center shadow-card">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[rgb(236,245,246)] text-brand">
+            <CheckCircle2 size={26} />
+          </span>
+          <div className="mt-4 text-[20px] font-bold text-ink-900">Request submitted</div>
+          <div className="mt-2 text-sm text-ink-400">
+            Your {definition.title} request has been submitted and routed for approval.
+          </div>
+          <div className="mt-6 flex justify-center">
+            <Button asChild>
+              <Link to="/requests/new">New Request</Link>
+            </Button>
+          </div>
         </div>
-        <div className="mt-6 flex justify-center">
-          <Button asChild>
-            <Link to="/requests/new">New Request</Link>
-          </Button>
-        </div>
-      </div>
+      </>
     );
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="mt-[14px] rounded-xl border border-line-soft bg-surface p-7 shadow-card"
-    >
-      <div className="text-[20px] font-bold text-ink-900">{definition.title}</div>
-      <div className="mt-[22px]">
-        <FormRenderer
-          sections={engine.sections}
-          values={engine.values}
-          errors={engine.errors}
-          onChange={engine.setValue}
-          disabled={submitting}
-        />
-      </div>
-      {overBalance && (
-        <div
-          className="mt-4 flex items-start gap-2 rounded-sm p-3 text-[12.5px] leading-[1.5]"
-          style={{ background: 'rgb(255,247,237)', color: 'rgb(204,78,0)' }}
-        >
-          <TriangleAlert size={16} className="mt-[1px] flex-none" />
-          <span>
-            This request exceeds your remaining balance for {overBalance.leaveTypeName} (
-            {overBalance.used}/{overBalance.total} used). You can still submit — HR will review.
-          </span>
+    <>
+      <Toast message={toast.message} variant={toast.variant} />
+      <form
+        onSubmit={handleSubmit}
+        className="mt-[14px] rounded-xl border border-line-soft bg-surface p-7 shadow-card"
+      >
+        <div className="text-[20px] font-bold text-ink-900">{definition.title}</div>
+        <div className="mt-[22px]">
+          <FormRenderer
+            sections={engine.sections}
+            values={engine.values}
+            errors={engine.errors}
+            onChange={engine.setValue}
+            disabled={submitting}
+          />
         </div>
-      )}
-      <ApproversPreview dto={dto} values={engine.values} />
-      {submitError && (
-        <div className="mt-4 rounded-sm border border-danger/30 bg-danger/[0.08] p-3 text-xs text-danger">
-          {submitError}
+        {overBalance && (
+          <div
+            className="mt-4 flex items-start gap-2 rounded-sm p-3 text-[12.5px] leading-[1.5]"
+            style={{ background: 'rgb(255,247,237)', color: 'rgb(204,78,0)' }}
+          >
+            <TriangleAlert size={16} className="mt-[1px] flex-none" />
+            <span>
+              This request exceeds your remaining balance for {overBalance.leaveTypeName} (
+              {overBalance.used}/{overBalance.total} used). You can still submit — HR will review.
+            </span>
+          </div>
+        )}
+        <ApproversPreview dto={dto} values={engine.values} />
+        <div className="mt-6 flex items-center justify-between">
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={submitting}>
+            <Send size={16} />
+            {submitting ? 'Submitting…' : 'Submit Request'}
+          </Button>
         </div>
-      )}
-      <div className="mt-6 flex items-center justify-between">
-        <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={submitting}>
-          <Send size={16} />
-          {submitting ? 'Submitting…' : 'Submit Request'}
-        </Button>
-      </div>
-    </form>
+      </form>
+    </>
   );
 }
 

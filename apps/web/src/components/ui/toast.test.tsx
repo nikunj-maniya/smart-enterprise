@@ -45,3 +45,25 @@ test('useToast respects a custom duration', (t) => {
   act(() => t.mock.timers.tick(1));
   assert.equal(result.current.message, null);
 });
+
+test('Toast defaults to the success background when no variant is given', () => {
+  render(<Toast message="Saved" />);
+  assert.equal(screen.getByRole('status').style.backgroundColor, 'rgb(17, 48, 47)');
+});
+
+test('Toast renders the danger background for the error variant', () => {
+  render(<Toast message="Failed" variant="error" />);
+  assert.equal(screen.getByRole('status').style.backgroundColor, 'rgb(229, 72, 77)');
+});
+
+test('useToast defaults to the success variant', () => {
+  const { result } = renderHook(() => useToast());
+  act(() => result.current.show('Created'));
+  assert.equal(result.current.variant, 'success');
+});
+
+test('useToast.show sets an explicit error variant', () => {
+  const { result } = renderHook(() => useToast());
+  act(() => result.current.show('Something went wrong', 'error'));
+  assert.equal(result.current.variant, 'error');
+});

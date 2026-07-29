@@ -1,8 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
-import type { SearchResultItem } from '@se/shared';
 import { SearchOverlay } from './SearchOverlay';
 
 interface Stub {
@@ -12,18 +10,30 @@ interface Stub {
   body?: unknown;
 }
 
+interface Recorded {
+  method: string;
+  path: string;
+  body: unknown;
+}
+
 let stubs: Stub[] = [];
+let requests: Recorded[] = [];
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
   stubs = [];
+  requests = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace('http://localhost:4000', '');
     const method = init?.method ?? 'GET';
-    const stub = stubs.find((s) => s.method === method && s.path === path);
-    if (!stub) {
+    requests.push({ method, path, body: init?.body ? JSON.parse(init.body as string) : undefined });
+    // Consume stubs in FIFO order so sequential calls to the same path (e.g. two `/smart-search`
+    // questions in one thread) each get their own queued response.
+    const stubIndex = stubs.findIndex((s) => s.method === method && s.path === path);
+    if (stubIndex === -1) {
       return new Response(JSON.stringify({ error: `No stub for ${method} ${path}` }), { status: 500 });
     }
+    const [stub] = stubs.splice(stubIndex, 1);
     return new Response(stub.status === 204 ? null : JSON.stringify(stub.body), { status: stub.status });
   }) as typeof fetch;
 });
@@ -33,94 +43,136 @@ afterEach(() => {
   cleanup();
 });
 
-function LocationProbe() {
-  const location = useLocation();
-  return <div data-testid="location">{location.pathname + location.search}</div>;
+function stubSmartSearch(body: unknown, status = 200) {
+  stubs.push({ method: 'POST', path: '/smart-search', status, body });
 }
 
-function renderOverlay(open: boolean, onClose: () => void) {
-  return render(
-    <MemoryRouter initialEntries={['/start']}>
-      <SearchOverlay open={open} onClose={onClose} />
-      <LocationProbe />
-    </MemoryRouter>,
-  );
-}
-
-const requestItem: SearchResultItem = { type: 'request', id: 'req-1', title: 'WiFi request', subtitle: 'Pending' };
-const userItem: SearchResultItem = { type: 'user', id: 'user-1', title: 'Jane Doe', subtitle: 'jane@acme.com' };
-
-function stubSearch(q: string, groups: { type: SearchResultItem['type']; label: string; items: SearchResultItem[] }[]) {
-  stubs.push({ method: 'GET', path: `/search?q=${q}`, status: 200, body: { groups } });
+function ask(text: string) {
+  const textarea = screen.getByPlaceholderText('Ask about leave, WFH, the user directory, or your own requests…');
+  fireEvent.change(textarea, { target: { value: text } });
+  fireEvent.keyDown(textarea, { key: 'Enter' });
 }
 
 test('renders nothing when closed', () => {
-  const { container } = renderOverlay(false, () => {});
-  assert.equal(container.querySelector('input'), null);
+  const { container } = render(<SearchOverlay open={false} onClose={() => {}} />);
+  assert.equal(container.querySelector('textarea'), null);
 });
 
-test('shows the "start typing" hint below the minimum query length', () => {
-  renderOverlay(true, () => {});
-  assert.ok(screen.getByText('Start typing to search across enterprises, users…'));
-  fireEvent.change(screen.getByPlaceholderText('Search enterprises, users…'), { target: { value: 'a' } });
-  assert.ok(screen.getByText('Start typing to search across enterprises, users…'));
+test('shows the empty-state hint before any question is asked', () => {
+  render(<SearchOverlay open onClose={() => {}} />);
+  assert.ok(screen.getByText('Ask a question about staff leave/WFH, the user directory, or your own requests to get started.'));
 });
 
-test('debounces the query and renders grouped results', async () => {
-  stubSearch('wifi', [
-    { type: 'request', label: 'Requests', items: [requestItem] },
-    { type: 'user', label: 'Users', items: [userItem] },
-  ]);
-  renderOverlay(true, () => {});
-  fireEvent.change(screen.getByPlaceholderText('Search enterprises, users…'), { target: { value: 'wifi' } });
-  assert.ok(await screen.findByText('WiFi request'));
-  assert.ok(screen.getByText('Requests'));
+test('sending a question renders the user bubble, a thinking state, then the assistant reply', async () => {
+  stubSmartSearch({ reply: 'Nobody is on leave next week.', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('who is on leave next week');
+
+  assert.ok(screen.getByText('who is on leave next week'));
+  assert.ok(screen.getByText('Thinking…'));
+  assert.ok(await screen.findByText('Nobody is on leave next week.'));
+  assert.equal(requests[0].method, 'POST');
+  assert.equal(requests[0].path, '/smart-search');
+  assert.deepEqual(requests[0].body, { message: 'who is on leave next week', history: [] });
+});
+
+test('a follow-up question in the same thread sends prior turns as history and both stay visible', async () => {
+  stubSmartSearch({ reply: 'Jane is on leave for 3 days.', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('who is on leave next week');
+  await screen.findByText('Jane is on leave for 3 days.');
+
+  stubSmartSearch({ reply: 'Bob is also on WFH that week.', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  ask('anyone else?');
+  await screen.findByText('Bob is also on WFH that week.');
+
+  // both turns still render — the thread accumulates, it isn't wiped per question
+  assert.ok(screen.getByText('who is on leave next week'));
+  assert.ok(screen.getByText('Jane is on leave for 3 days.'));
+  assert.ok(screen.getByText('anyone else?'));
+  assert.ok(screen.getByText('Bob is also on WFH that week.'));
+  assert.deepEqual(requests[1].body, {
+    message: 'anyone else?',
+    history: [
+      { role: 'user', content: 'who is on leave next week' },
+      { role: 'assistant', content: 'Jane is on leave for 3 days.' },
+    ],
+  });
+});
+
+test('renders an absence row table under the assistant bubble when rows are present', async () => {
+  stubSmartSearch({
+    reply: 'One person is on leave.',
+    toolUsed: 'queryAbsences',
+    denied: false,
+    rows: [
+      {
+        requestId: 'req-1',
+        personId: 'user-1',
+        personName: 'Jane Doe',
+        departmentId: null,
+        departmentName: null,
+        projectId: null,
+        projectName: null,
+        type: 'leave',
+        startDate: '2026-08-03',
+        endDate: '2026-08-05',
+        halfDayCount: null,
+      },
+    ],
+  });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('who is on leave next week');
+  await screen.findByText('One person is on leave.');
   assert.ok(screen.getByText('Jane Doe'));
-  assert.ok(screen.getByText('Users'));
+  assert.ok(screen.getByText('Leave'));
 });
 
-test('shows a no-matches state when the search returns no groups', async () => {
-  stubSearch('zzz', []);
-  renderOverlay(true, () => {});
-  fireEvent.change(screen.getByPlaceholderText('Search enterprises, users…'), { target: { value: 'zzz' } });
-  assert.ok(await screen.findByText('No matches found.'));
+test('an out-of-scope question gets the fixed decline reply, not a table', async () => {
+  stubSmartSearch({
+    reply: 'I can only help with information available in smartEnterprise.',
+    toolUsed: null,
+    denied: false,
+    rows: null,
+  });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask("what's the weather today");
+  assert.ok(await screen.findByText('I can only help with information available in smartEnterprise.'));
+});
+
+test('a failed request shows a retry-friendly error and Retry resends the same question', async () => {
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('who is on leave next week');
+  assert.ok(await screen.findByText('Something went wrong. Check your connection and try again.'));
+  assert.equal(requests.length, 1);
+
+  stubSmartSearch({ reply: 'Nobody is on leave.', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  fireEvent.click(screen.getByText('Retry'));
+  assert.ok(await screen.findByText('Nobody is on leave.'));
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].body, { message: 'who is on leave next week', history: [] });
+});
+
+test('Shift+Enter does not send the message', () => {
+  render(<SearchOverlay open onClose={() => {}} />);
+  const textarea = screen.getByPlaceholderText('Ask about leave, WFH, the user directory, or your own requests…');
+  fireEvent.change(textarea, { target: { value: 'who is on leave' } });
+  fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
+  assert.equal(requests.length, 0);
 });
 
 test('the Esc badge closes the overlay', () => {
   let closed = false;
-  renderOverlay(true, () => (closed = true));
+  render(<SearchOverlay open onClose={() => (closed = true)} />);
   fireEvent.click(screen.getByText('Esc'));
   assert.equal(closed, true);
 });
 
-test('clicking the scrim closes the overlay, clicking the card does not', () => {
+test('clicking the scrim closes the overlay, clicking the panel does not', () => {
   let closeCount = 0;
-  const { container } = renderOverlay(true, () => (closeCount += 1));
-  fireEvent.click(screen.getByPlaceholderText('Search enterprises, users…'));
+  const { container } = render(<SearchOverlay open onClose={() => (closeCount += 1)} />);
+  fireEvent.click(screen.getByPlaceholderText('Ask about leave, WFH, the user directory, or your own requests…'));
   assert.equal(closeCount, 0);
   fireEvent.click(container.firstElementChild as Element);
   assert.equal(closeCount, 1);
-});
-
-test('clicking a result closes the overlay and navigates to its detail route', async () => {
-  stubSearch('wifi', [{ type: 'request', label: 'Requests', items: [requestItem] }]);
-  let closed = false;
-  renderOverlay(true, () => (closed = true));
-  fireEvent.change(screen.getByPlaceholderText('Search enterprises, users…'), { target: { value: 'wifi' } });
-  fireEvent.click(await screen.findByText('WiFi request'));
-  assert.equal(closed, true);
-  assert.equal(screen.getByTestId('location').textContent, '/requests?requestId=req-1');
-});
-
-test('ArrowDown then Enter selects the second result', async () => {
-  stubSearch('wifi', [
-    { type: 'request', label: 'Requests', items: [requestItem] },
-    { type: 'user', label: 'Users', items: [userItem] },
-  ]);
-  renderOverlay(true, () => {});
-  fireEvent.change(screen.getByPlaceholderText('Search enterprises, users…'), { target: { value: 'wifi' } });
-  await screen.findByText('Jane Doe');
-  fireEvent.keyDown(window, { key: 'ArrowDown' });
-  fireEvent.keyDown(window, { key: 'Enter' });
-  assert.equal(screen.getByTestId('location').textContent, '/organization/users?highlight=user-1');
 });

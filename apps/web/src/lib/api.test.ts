@@ -29,7 +29,7 @@ import {
   getOverCapDays,
   getAbsenceCap,
   updateAbsenceCap,
-  globalSearch,
+  askSmartSearch,
   getSlackConfig,
   connectSlack,
   disconnectSlack,
@@ -183,6 +183,60 @@ test('apiFetch falls back to a generic message when the error response body is n
       return true;
     },
   );
+});
+
+// ── Expired-access-token silent refresh ─────────────────────
+
+test('apiFetch silently refreshes an expired access token and retries the original request once', async () => {
+  const calls: Array<{ path: string; method: string }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input).replace('http://localhost:4000', '');
+    calls.push({ path, method: init?.method ?? 'GET' });
+    if (path === '/requests' && calls.filter((c) => c.path === '/requests').length === 1) {
+      return new Response(JSON.stringify({ error: 'Invalid or expired token' }), { status: 401 });
+    }
+    if (path === '/auth/refresh') return new Response(JSON.stringify({}), { status: 200 });
+    return new Response(JSON.stringify({ id: 'req-1' }), { status: 200 });
+  }) as typeof fetch;
+
+  const result = await apiFetch('/requests', { method: 'POST', body: JSON.stringify({}) });
+  assert.deepEqual(result, { id: 'req-1' });
+  assert.deepEqual(
+    calls.map((c) => c.path),
+    ['/requests', '/auth/refresh', '/requests'],
+  );
+});
+
+test('apiFetch surfaces the original 401 when the refresh attempt itself fails, without looping', async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = String(input).replace('http://localhost:4000', '');
+    calls.push(path);
+    if (path === '/auth/refresh') return new Response(JSON.stringify({ error: 'Invalid or expired refresh token' }), { status: 401 });
+    return new Response(JSON.stringify({ error: 'Invalid or expired token' }), { status: 401 });
+  }) as typeof fetch;
+
+  await assert.rejects(
+    () => apiFetch('/requests', { method: 'POST', body: JSON.stringify({}) }),
+    (err: unknown) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal((err as ApiError).status, 401);
+      return true;
+    },
+  );
+  assert.deepEqual(calls, ['/requests', '/auth/refresh']);
+});
+
+test('apiFetch does not attempt a refresh for /auth/login or /auth/refresh themselves', async () => {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input).replace('http://localhost:4000', ''));
+    return new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401 });
+  }) as typeof fetch;
+
+  await assert.rejects(() => apiFetch('/auth/login', { method: 'POST', body: '{}' }));
+  await assert.rejects(() => apiFetch('/auth/refresh', { method: 'POST' }));
+  assert.deepEqual(calls, ['/auth/login', '/auth/refresh']);
 });
 
 // ── Directory search ─────────────────────────────────────────
@@ -410,12 +464,30 @@ test('updateAbsenceCap PUTs the new cap to /leave-types/absence-cap', async () =
   assert.deepEqual(requests[0].body, { cap: 5 });
 });
 
-// ── Global search ─────────────────────────────────────────────
+// ── Smart search (LLM-backed chat) ─────────────────────────────
 
-test('globalSearch URL-encodes the query string', async () => {
-  stubs.push({ method: 'GET', path: '/search?q=acme%20corp', status: 200, body: { groups: [] } });
-  await globalSearch('acme corp');
-  assert.equal(requests[0].path, '/search?q=acme%20corp');
+test('askSmartSearch POSTs the message and history to /smart-search', async () => {
+  stubs.push({
+    method: 'POST',
+    path: '/smart-search',
+    status: 200,
+    body: { reply: 'No one is on leave next week.', toolUsed: 'queryAbsences', denied: false, rows: [] },
+  });
+  const history = [{ role: 'user' as const, content: 'hi' }];
+  const result = await askSmartSearch('who is on leave next week', history);
+  assert.deepEqual(requests[0].body, { message: 'who is on leave next week', history });
+  assert.deepEqual(result, { reply: 'No one is on leave next week.', toolUsed: 'queryAbsences', denied: false, rows: [] });
+});
+
+test('askSmartSearch defaults history to an empty array', async () => {
+  stubs.push({
+    method: 'POST',
+    path: '/smart-search',
+    status: 200,
+    body: { reply: "I can only help with information available in smartEnterprise.", toolUsed: null, denied: false, rows: null },
+  });
+  await askSmartSearch('what is the weather today');
+  assert.deepEqual(requests[0].body, { message: 'what is the weather today', history: [] });
 });
 
 // ── Slack integration ─────────────────────────────────────────

@@ -28,7 +28,7 @@ import { leaveBalancesRouter } from './modules/leave-balances/leave-balances.rou
 import { frontDeskRouter } from './modules/front-desk/front-desk.routes.js';
 import { itemCatalogRouter } from './modules/item-catalog/item-catalog.routes.js';
 import { absencesRouter } from './modules/absences/absences.routes.js';
-import { searchRouter } from './modules/search/search.routes.js';
+import { smartSearchRouter } from './modules/smart-search/smart-search.routes.js';
 import { slackConfigRouter } from './modules/slack/slack-config.routes.js';
 import { slackWebhookRouter } from './modules/slack/slack-webhook.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
@@ -41,7 +41,7 @@ import {
 } from './modules/self-registration/self-registration.routes.js';
 import { errorHandler } from './middleware/error.js';
 import { requireCsrfToken } from './middleware/csrf.js';
-import { globalRateLimiter, authRateLimiter } from './middleware/rate-limit.js';
+import { globalRateLimiter, authRateLimiter, smartSearchRateLimiter } from './middleware/rate-limit.js';
 import { scheduleAutoCompleteRequestsJob } from './jobs/auto-complete-requests.job.js';
 import { scheduleApprovalRemindersJob } from './jobs/approval-reminders.job.js';
 import { scheduleEscalationSweepJob } from './jobs/escalation-sweep.job.js';
@@ -107,7 +107,7 @@ app.use('/leave-balances', leaveBalancesRouter);
 app.use('/front-desk', frontDeskRouter);
 app.use('/item-catalog', itemCatalogRouter);
 app.use('/absences', absencesRouter);
-app.use('/search', searchRouter);
+app.use('/smart-search', smartSearchRateLimiter, smartSearchRouter);
 app.use('/slack/config', slackConfigRouter);
 app.use('/slack/interactions', slackWebhookRouter);
 app.use('/reports', reportsRouter);
