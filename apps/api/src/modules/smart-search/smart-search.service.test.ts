@@ -76,7 +76,12 @@ type UserRow = {
 };
 
 let requestRows: RequestRow[] = [];
-let projectRows: { id: string; name: string }[] = [];
+let projectRows: {
+  id: string;
+  name: string;
+  status?: string;
+  members?: { roleInProject: string; user: { id: string; name: string } }[];
+}[] = [];
 let departmentRows: { id: string; name: string }[] = [];
 let projectMemberRows: { projectId: string }[] = [];
 let userRows: UserRow[] = [];
@@ -97,7 +102,7 @@ Object.defineProperty(prisma, 'request', {
   configurable: true,
 });
 Object.defineProperty(prisma, 'project', {
-  value: { findMany: async () => projectRows },
+  value: { findMany: async () => projectRows, count: async () => projectRows.length },
   configurable: true,
 });
 Object.defineProperty(prisma, 'department', {
@@ -339,6 +344,31 @@ describe('handleSmartSearch — queryAbsences (HR / PM-TL scoped, Employee denie
     const result = await handleSmartSearch('t1', ADMIN, { message: "Is Nobody Real's leave approved?" });
 
     assert.deepEqual(result.rows, []);
+  });
+});
+
+describe('handleSmartSearch — queryProjects (PM lookup)', () => {
+  it('a Project Manager asking who manages a project gets the correct PM named in the narrated reply', async () => {
+    projectRows = [
+      {
+        id: 'proj-1',
+        name: 'Project Phoenix',
+        status: 'active',
+        members: [{ roleInProject: 'PM', user: { id: 'pm2', name: 'Priya Manager' } }],
+      },
+    ];
+    llmResponses = [
+      toolCallResponse('queryProjects', { search: 'Project Phoenix' }),
+      narrateResponse('The project manager of Project Phoenix is Priya Manager.'),
+    ];
+
+    const result = await handleSmartSearch('t1', PM, { message: 'who is the project manager of Project Phoenix' });
+
+    assert.equal(result.toolUsed, 'queryProjects');
+    assert.equal(result.denied, false);
+    assert.equal(result.reply, 'The project manager of Project Phoenix is Priya Manager.');
+    assert.equal(result.rows.length, 1);
+    assert.equal((result.rows[0] as { pm: { name: string } | null }).pm?.name, 'Priya Manager');
   });
 });
 
