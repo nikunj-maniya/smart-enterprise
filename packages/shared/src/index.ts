@@ -1307,39 +1307,54 @@ export type AbsenceCapDto = z.infer<typeof absenceCapDtoSchema>;
 export const updateAbsenceCapRequestSchema = z.object({ cap: z.number().int().min(1) });
 export type UpdateAbsenceCapRequest = z.infer<typeof updateAbsenceCapRequestSchema>;
 
-// ── Global Search (global-search, role- and tenant-scoped) ──
-export const searchResultTypeSchema = z.enum([
-  'request',
-  'user',
-  'project',
-  'department',
-  'enterprise',
-  'registration',
-  'platform-user',
+// ── Smart Search (smart-search, tool-calling LLM assistant, tenant-scoped) ──
+export const smartSearchChatMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().min(1).max(4000),
+});
+export type SmartSearchChatMessage = z.infer<typeof smartSearchChatMessageSchema>;
+
+/** `history` is the prior turns of the same thread; the server trims it to a small recent
+ *  window before sending it to the model — this cap is just a request-size guardrail. */
+export const smartSearchRequestSchema = z.object({
+  message: z.string().min(1).max(4000),
+  history: z.array(smartSearchChatMessageSchema).max(20).optional(),
+});
+export type SmartSearchRequest = z.infer<typeof smartSearchRequestSchema>;
+
+export const smartSearchToolNameSchema = z.enum(['queryAbsences', 'queryUsers', 'queryMyRequests']);
+export type SmartSearchToolName = z.infer<typeof smartSearchToolNameSchema>;
+
+/** `toolUsed` is `null` when the model matched no tool (declined) or named an unrecognized one.
+ *  `denied` is true only when a matched tool's executor rejected the viewer for permission — in
+ *  that case `rows` is always empty regardless of which tool was involved. */
+export const smartSearchResponseSchema = z.discriminatedUnion('toolUsed', [
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryAbsences'),
+    denied: z.boolean(),
+    rows: z.array(absenceEntryDtoSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryUsers'),
+    denied: z.boolean(),
+    rows: z.array(orgUserSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal('queryMyRequests'),
+    denied: z.boolean(),
+    rows: z.array(requestListItemSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    toolUsed: z.literal(null),
+    denied: z.boolean(),
+    rows: z.tuple([]),
+  }),
 ]);
-export type SearchResultType = z.infer<typeof searchResultTypeSchema>;
-
-export const searchResultItemSchema = z.object({
-  type: searchResultTypeSchema,
-  id: z.string(),
-  title: z.string(),
-  subtitle: z.string().nullable(),
-});
-export type SearchResultItem = z.infer<typeof searchResultItemSchema>;
-
-export const searchResultGroupSchema = z.object({
-  type: searchResultTypeSchema,
-  label: z.string(),
-  items: z.array(searchResultItemSchema),
-});
-export type SearchResultGroup = z.infer<typeof searchResultGroupSchema>;
-
-/** `q` is validated non-empty here; the overlay itself enforces the 2-char minimum before calling. */
-export const globalSearchQuerySchema = z.object({ q: z.string().min(1) });
-export type GlobalSearchQuery = z.infer<typeof globalSearchQuerySchema>;
-
-export const globalSearchResponseSchema = z.object({ groups: z.array(searchResultGroupSchema) });
-export type GlobalSearchResponse = z.infer<typeof globalSearchResponseSchema>;
+export type SmartSearchResponse = z.infer<typeof smartSearchResponseSchema>;
 
 // ── Slack Integration (slack-integration, tenant-scoped, Enterprise Admin only, PRD §11) ──
 export const slackConfigStatusSchema = z.enum(['disconnected', 'connected', 'error']);

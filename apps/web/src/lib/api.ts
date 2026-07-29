@@ -17,7 +17,6 @@ import type {
   FrontDeskTodayResponse,
   FulfilmentQueueResponse,
   FulfilmentQueueTab,
-  GlobalSearchResponse,
   HolidayCreate,
   HolidayDto,
   HolidayUpdate,
@@ -35,6 +34,8 @@ import type {
   RequestDto,
   SignedUrlResponse,
   SlackConfigDto,
+  SmartSearchChatMessage,
+  SmartSearchResponse,
   TransitionRequestInput,
   UpdateAbsenceCapRequest,
   UpdateItemCatalogRequest,
@@ -65,7 +66,29 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+// The `se_access` cookie expires after 15 minutes (auth-cookies.ts); a request made after that
+// (e.g. finishing a multi-field form like a leave request) 401s even though the 7-day `se_refresh`
+// cookie is still good. Rather than surfacing that as a dead-end "try again" error, silently swap
+// it for a fresh access token once and replay the original request — the user never sees it.
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+      .then((res) => res.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+// Never itself trigger a refresh-and-retry: /auth/login has no session yet, and /auth/refresh
+// retrying itself would loop.
+const NO_REFRESH_PATHS = new Set(['/auth/login', '/auth/refresh']);
+
+export async function apiFetch<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set('Content-Type', 'application/json');
   // Auth travels via httpOnly cookies (finding #6) — `credentials: 'include'` is what makes the
@@ -76,6 +99,11 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   }
 
   const res = await fetch(`${API_URL}${path}`, { ...options, headers, credentials: 'include' });
+
+  if (res.status === 401 && !isRetry && !NO_REFRESH_PATHS.has(path)) {
+    if (await refreshSession()) return apiFetch<T>(path, options, true);
+  }
+
   const data = res.status === 204 ? null : await res.json().catch(() => null);
 
   if (!res.ok) {
@@ -273,9 +301,19 @@ export function updateAbsenceCap(body: UpdateAbsenceCapRequest) {
   });
 }
 
-/** `GET /search` — role- and tenant-scoped global search, grouped by entity type. */
-export function globalSearch(q: string) {
-  return apiFetch<GlobalSearchResponse>(`/search?q=${encodeURIComponent(q)}`);
+/** One turn of prior chat context sent to `POST /smart-search` so follow-up questions can be
+ *  answered in the same thread — an alias of the shared chat-message type under the name this
+ *  client already used before that shared schema landed. */
+export type SmartSearchHistoryMessage = SmartSearchChatMessage;
+export type { SmartSearchResponse };
+
+/** `POST /smart-search` — ask the LLM-backed smart search assistant a natural-language question,
+ *  passing recent chat history so it can answer follow-ups in the same thread. */
+export function askSmartSearch(message: string, history: SmartSearchHistoryMessage[] = []) {
+  return apiFetch<SmartSearchResponse>('/smart-search', {
+    method: 'POST',
+    body: JSON.stringify({ message, history }),
+  });
 }
 
 /** `GET /slack/config` (Enterprise Admin only) — the tenant's Slack integration status and settings. */

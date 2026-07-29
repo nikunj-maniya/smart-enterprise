@@ -124,7 +124,7 @@ test('blocks submit with a validation error when a required field is empty', asy
   assert.equal(requests.some((r) => r.method === 'POST'), false);
 });
 
-test('submits successfully and shows the confirmation screen', async () => {
+test('submits successfully, shows the confirmation screen, and toasts a success message', async () => {
   formBody = itForm;
   renderAt('it');
   await screen.findByText('IT Request');
@@ -133,8 +133,41 @@ test('submits successfully and shows the confirmation screen', async () => {
   fireEvent.click(screen.getByRole('button', { name: /Submit Request/ }));
 
   assert.ok(await screen.findByText('Request submitted'));
+  assert.ok(await screen.findByText('Request submitted successfully.'));
   const post = requests.find((r) => r.method === 'POST' && r.path === '/requests');
   assert.deepEqual(post?.body, { formKey: 'it', payload: { summary: 'Need a new laptop' } });
+});
+
+test('shows the backend error message in a toast, not inline, when submission fails', async () => {
+  formBody = itForm;
+  submitStatus = 500; // stub responds with { error: 'Validation failed.' } for any non-201 status
+  renderAt('it');
+  await screen.findByText('IT Request');
+
+  fireEvent.change(screen.getByLabelText(/Summary/), { target: { value: 'Need a new laptop' } });
+  fireEvent.click(screen.getByRole('button', { name: /Submit Request/ }));
+
+  const toastEl = await screen.findByRole('status');
+  assert.equal(toastEl.textContent, 'Validation failed.');
+});
+
+test('falls back to a generic toast message when submission fails at the network level (no backend response)', async () => {
+  formBody = itForm;
+  renderAt('it');
+  await screen.findByText('IT Request');
+  fireEvent.change(screen.getByLabelText(/Summary/), { target: { value: 'Need a new laptop' } });
+
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input).replace('http://localhost:4000', '');
+    if ((init?.method ?? 'GET') === 'POST' && path === '/requests') throw new TypeError('Failed to fetch');
+    return priorFetch(input, init);
+  }) as typeof fetch;
+
+  fireEvent.click(screen.getByRole('button', { name: /Submit Request/ }));
+
+  const toastEl = await screen.findByRole('status');
+  assert.equal(toastEl.textContent, 'Something went wrong submitting your request. Please try again.');
 });
 
 test('Cancel navigates back to the request-type list', async () => {

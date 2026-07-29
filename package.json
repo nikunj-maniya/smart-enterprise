@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
+    "dev:llm": "bash scripts/dev-with-llm.sh",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test:coverage": "pnpm -r test:coverage",

@@ -1,129 +1,194 @@
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Building,
-  Building2,
-  ClipboardCheck,
-  ClipboardList,
-  FolderKanban,
-  Search,
-  User,
-  Users,
-  type LucideIcon,
-} from 'lucide-react';
-import type { SearchResultItem, SearchResultType } from '@se/shared';
-import { ApiError, globalSearch } from '@/lib/api';
+import { Search, Send } from 'lucide-react';
+import type { AbsenceEntryDto, OrgUserDto, RequestListItemDto } from '@se/shared';
+import { ABSENCE_TYPE_META, dateFromDay, formatDateRangeShort } from '@/components/absences/absenceStyle';
+import { StatusBadge, TypeTile, requestTypeMeta } from '@/pages/requests/shared';
+import { askSmartSearch, type SmartSearchHistoryMessage, type SmartSearchResponse } from '@/lib/api';
 
-const DEBOUNCE_MS = 250;
-const MIN_QUERY_LENGTH = 2;
+/** How many prior turns to send back as context for a follow-up question — bounds prompt size,
+ *  matches the server's own trimming window. */
+const HISTORY_WINDOW = 8;
 
-const TYPE_ICON: Record<SearchResultType, LucideIcon> = {
-  request: ClipboardList,
-  user: User,
-  project: FolderKanban,
-  department: Building,
-  enterprise: Building2,
-  registration: ClipboardCheck,
-  'platform-user': Users,
-};
+// Plain `Omit` doesn't distribute over a union (it flattens `SmartSearchResponse` to its common
+// keys, losing the `toolUsed`/`rows` correlation) — this variant re-distributes over each member.
+type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K> : never;
 
-/** Deep-links a result to the screen that owns it (global-search spec: "opening its detail
- *  where one exists"). Requests reuse the existing `?requestId=` drawer-open mechanism; every
- *  other type lands on its list page with `?highlight=<id>` scrolling the row into view. */
-function resultPath(item: SearchResultItem): string {
-  switch (item.type) {
-    case 'request':
-      return `/requests?requestId=${item.id}`;
-    case 'user':
-      return `/organization/users?highlight=${item.id}`;
-    case 'project':
-      return `/organization/projects?highlight=${item.id}`;
-    case 'department':
-      return `/organization/departments?highlight=${item.id}`;
-    case 'enterprise':
-      return `/enterprises?highlight=${item.id}`;
-    case 'registration':
-      return `/registrations?highlight=${item.id}`;
-    case 'platform-user':
-      return `/users?highlight=${item.id}`;
-  }
+type ChatMessage =
+  | { id: string; role: 'user'; content: string }
+  | ({ id: string; role: 'assistant'; content: string } & DistributiveOmit<SmartSearchResponse, 'reply'>);
+
+/** Whole days spanned by an absence, in application code (never asked of the model) — a simple
+ *  display figure independent of the narration/day-math the backend computes for its own answer. */
+function absenceDayCount(row: AbsenceEntryDto): number {
+  const days = Math.round((dateFromDay(row.endDate).getTime() - dateFromDay(row.startDate).getTime()) / 86_400_000) + 1;
+  return row.halfDayCount ? days - row.halfDayCount * 0.5 : days;
 }
 
-/** Command-style search overlay (matches the design). Groups results by entity type, debounces
- *  the query, and supports arrow-key navigation + Enter to select. */
-export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const navigate = useNavigate();
-  const [query, setQuery] = React.useState('');
-  const [groups, setGroups] = React.useState<{ type: SearchResultType; label: string; items: SearchResultItem[] }[]>(
-    [],
+function AbsenceRows({ rows }: { rows: AbsenceEntryDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[360px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Person</th>
+            <th className="px-3 py-2">Type</th>
+            <th className="px-3 py-2">Dates</th>
+            <th className="px-3 py-2">Days</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.requestId} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">{r.personName}</td>
+              <td className="px-3 py-2">{ABSENCE_TYPE_META[r.type].label}</td>
+              <td className="px-3 py-2">{formatDateRangeShort(r.startDate, r.endDate)}</td>
+              <td className="px-3 py-2">{absenceDayCount(r)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
-  const [loading, setLoading] = React.useState(false);
-  const [activeIndex, setActiveIndex] = React.useState(0);
-  const inputRef = React.useRef<HTMLInputElement>(null);
+}
 
-  const flatItems = React.useMemo(() => groups.flatMap((g) => g.items), [groups]);
+function UserRows({ rows }: { rows: OrgUserDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[420px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Name</th>
+            <th className="px-3 py-2">Email</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2">Roles</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((u) => (
+            <tr key={u.id} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">{u.name}</td>
+              <td className="px-3 py-2">{u.email}</td>
+              <td className="px-3 py-2 capitalize">{u.status}</td>
+              <td className="px-3 py-2">{u.roles.map((r) => r.name).join(', ') || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MyRequestRows({ rows }: { rows: RequestListItemDto[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 overflow-x-auto rounded-[10px] border border-line-soft">
+      <table className="w-full min-w-[380px] border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-line-soft text-left text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
+            <th className="px-3 py-2">Request</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2">Dates</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className="border-b border-line-soft text-ink-700 last:border-b-0">
+              <td className="px-3 py-2 font-semibold text-ink-900">
+                <span className="flex items-center gap-2">
+                  <TypeTile formKey={r.formKey} formTitle={r.formTitle} size={32} />
+                  {requestTypeMeta(r.formKey, r.formTitle).label}
+                </span>
+              </td>
+              <td className="px-3 py-2">
+                <StatusBadge status={r.status} />
+              </td>
+              <td className="px-3 py-2">
+                {r.startDate && r.endDate ? formatDateRangeShort(r.startDate, r.endDate) : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MessageRows({ message }: { message: ChatMessage }) {
+  if (message.role !== 'assistant' || !message.rows || message.rows.length === 0) return null;
+  if (message.toolUsed === 'queryAbsences') return <AbsenceRows rows={message.rows} />;
+  if (message.toolUsed === 'queryUsers') return <UserRows rows={message.rows} />;
+  if (message.toolUsed === 'queryMyRequests') return <MyRequestRows rows={message.rows} />;
+  return null;
+}
+
+/** Smart Search: an LLM-backed conversational overlay (replaces the old keyword search). Same
+ *  outer shell/animation as the previous overlay; internals are a growing chat thread instead of
+ *  a single input + result list. */
+export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
+  const [input, setInput] = React.useState('');
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [retryable, setRetryable] = React.useState<{ message: string; history: SmartSearchHistoryMessage[] } | null>(
+    null,
+  );
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
-    if (!open) return;
-    setQuery('');
-    setGroups([]);
-    setActiveIndex(0);
-    inputRef.current?.focus();
+    if (open) textareaRef.current?.focus();
   }, [open]);
 
   React.useEffect(() => {
-    if (!open || query.trim().length < MIN_QUERY_LENGTH) {
-      setGroups([]);
-      return;
-    }
-    setLoading(true);
-    const timer = setTimeout(() => {
-      globalSearch(query.trim())
-        .then((res) => {
-          setGroups(res.groups);
-          setActiveIndex(0);
-        })
-        .catch((err) => {
-          if (!(err instanceof ApiError)) throw err;
-          setGroups([]);
-        })
-        .finally(() => setLoading(false));
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [open, query]);
-
-  function selectItem(item: SearchResultItem) {
-    onClose();
-    navigate(resultPath(item));
-  }
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, pending]);
 
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveIndex((i) => Math.min(i + 1, flatItems.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter' && flatItems[activeIndex]) {
-        e.preventDefault();
-        selectItem(flatItems[activeIndex]);
-      }
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, flatItems, activeIndex, selectItem]);
+  }, [open, onClose]);
+
+  async function fetchReply(message: string, history: SmartSearchHistoryMessage[]) {
+    setPending(true);
+    setError(null);
+    try {
+      const { reply, ...rest } = await askSmartSearch(message, history);
+      const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, ...rest };
+      setMessages((prev) => [...prev, assistantMessage]);
+      setRetryable(null);
+    } catch {
+      // Never surface the raw error (network failure, 500, timeout, …) — a plain, retry-friendly
+      // message regardless of cause, matching the rest of this feature's "never a raw error" rule.
+      setError('Something went wrong. Check your connection and try again.');
+      setRetryable({ message, history });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function handleSend() {
+    const trimmed = input.trim();
+    if (!trimmed || pending) return;
+    const history: SmartSearchHistoryMessage[] = messages
+      .slice(-HISTORY_WINDOW)
+      .map((m) => ({ role: m.role, content: m.content }));
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', content: trimmed }]);
+    setInput('');
+    void fetchReply(trimmed, history);
+  }
+
+  function handleRetry() {
+    if (retryable) void fetchReply(retryable.message, retryable.history);
+  }
 
   if (!open) return null;
-
-  const trimmed = query.trim();
-  const showEmpty = trimmed.length < MIN_QUERY_LENGTH;
-  const showNoResults = !showEmpty && !loading && flatItems.length === 0;
-
-  let rowIndex = -1;
 
   return (
     <div
@@ -132,20 +197,18 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[560px] overflow-hidden rounded-[14px] bg-surface shadow-xl"
+        className="flex w-full max-w-[560px] flex-col overflow-hidden rounded-[14px] bg-surface shadow-xl"
         style={{ animation: 'seUp .2s ease' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-[11px] border-b border-line-soft px-[18px] py-4">
-          <Search size={20} className="text-ink-400" />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search enterprises, users…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="min-w-0 flex-1 border-none bg-transparent text-base text-ink-900 outline-none"
-          />
+          <span className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[8px] bg-[rgb(236,245,246)]">
+            <Search size={17} className="text-brand" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[14px] font-semibold text-ink-900">Smart Search</div>
+            <div className="truncate text-[12px] text-ink-400">Ask about staff leave/WFH, the user directory, or your own requests</div>
+          </div>
           <span
             className="cursor-pointer rounded-md border border-line px-[7px] py-[3px] text-[11px] font-semibold text-ink-400"
             onClick={onClose}
@@ -153,44 +216,71 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
             Esc
           </span>
         </div>
-        <div className="max-h-[380px] overflow-y-auto">
-          {showEmpty && (
+
+        <div ref={listRef} className="max-h-[420px] min-h-[160px] overflow-y-auto px-[18px] py-4">
+          {messages.length === 0 && !pending && (
             <div className="px-[18px] py-8 text-center text-[13px] text-ink-400">
-              Start typing to search across enterprises, users…
+              Ask a question about staff leave/WFH, the user directory, or your own requests to get started.
             </div>
           )}
-          {showNoResults && (
-            <div className="px-[18px] py-8 text-center text-[13px] text-ink-400">No matches found.</div>
-          )}
-          {groups.map((group) => (
-            <div key={group.type}>
-              <div className="px-[18px] pt-3 pb-1 text-[11px] font-semibold uppercase tracking-[.4px] text-ink-400">
-                {group.label}
+          <div className="flex flex-col gap-3">
+            {messages.map((m) => (
+              <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                <div
+                  className={
+                    m.role === 'user'
+                      ? 'max-w-[85%] rounded-[14px] rounded-tr-[4px] bg-brand px-4 py-3 text-[14px] text-brand-ink'
+                      : 'max-w-[85%] rounded-[14px] rounded-tl-[4px] bg-surface-muted px-4 py-3 text-[14px] text-ink-900'
+                  }
+                >
+                  <div className="whitespace-pre-wrap">{m.content}</div>
+                  <MessageRows message={m} />
+                </div>
               </div>
-              {group.items.map((item) => {
-                rowIndex += 1;
-                const isActive = rowIndex === activeIndex;
-                const Icon = TYPE_ICON[item.type];
-                return (
-                  <div
-                    key={`${item.type}-${item.id}`}
-                    onClick={() => selectItem(item)}
-                    onMouseEnter={() => setActiveIndex(rowIndex)}
-                    className="flex cursor-pointer items-center gap-3 px-[18px] py-[13px] border-b border-line-soft last:border-b-0"
-                    style={{ background: isActive ? 'var(--surface-muted)' : undefined }}
-                  >
-                    <span className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[8px] bg-[rgb(236,245,246)]">
-                      <Icon size={17} className="text-brand" />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="truncate text-[14px] font-semibold text-ink-900">{item.title}</div>
-                      {item.subtitle && <div className="text-[12px] text-ink-400">{item.subtitle}</div>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+            ))}
+            {pending && (
+              <div className="flex justify-start">
+                <div className="max-w-[85%] rounded-[14px] rounded-tl-[4px] bg-surface-muted px-4 py-3 text-[13px] text-ink-400">
+                  Thinking…
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-center justify-between gap-3 border-t border-line-soft px-[18px] py-[10px] text-[13px] text-danger">
+            <span>{error}</span>
+            <button type="button" onClick={handleRetry} className="flex-none font-semibold text-brand-hover">
+              Retry
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-end gap-[11px] border-t border-line-soft px-[18px] py-4">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            placeholder="Ask about leave, WFH, the user directory, or your own requests…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            className="min-w-0 flex-1 resize-none border-none bg-transparent text-base text-ink-900 outline-none"
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!input.trim() || pending}
+            aria-label="Send"
+            className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-brand text-brand-ink disabled:opacity-40"
+          >
+            <Send size={17} />
+          </button>
         </div>
       </div>
     </div>

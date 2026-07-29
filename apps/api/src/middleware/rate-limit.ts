@@ -18,3 +18,13 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/** Limiter for the LLM-backed smart-search endpoint — each request costs one or two model
+ *  round-trips, so it needs its own (lower) cap independent of the coarse global limiter. */
+export const smartSearchRateLimiter = rateLimit({
+  windowMs: 60_000,
+  // Env-tunable; production default stays 20/min.
+  limit: Number(process.env.SMART_SEARCH_RATE_LIMIT ?? 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
