@@ -25,7 +25,7 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'archived', label: 'Archived' },
 ];
 
-const STATUS_STYLE: Record<ProjectDto['status'], { label: string; bg: string; fg: string; dot: string }> = {
+export const STATUS_STYLE: Record<ProjectDto['status'], { label: string; bg: string; fg: string; dot: string }> = {
   active: { label: 'Active', bg: 'rgb(233,246,233)', fg: 'rgb(33,131,88)', dot: 'rgb(70,167,88)' },
   archived: { label: 'Archived', bg: 'rgb(241,242,242)', fg: 'var(--ink-500)', dot: 'var(--ink-400)' },
 };

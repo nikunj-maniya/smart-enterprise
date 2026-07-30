@@ -48,7 +48,7 @@ function stubSmartSearch(body: unknown, status = 200) {
 }
 
 function ask(text: string) {
-  const textarea = screen.getByPlaceholderText('Ask about leave, WFH, the user directory, or your own requests…');
+  const textarea = screen.getByPlaceholderText('Ask about leave, WFH, departments, projects, holidays, or your own requests…');
   fireEvent.change(textarea, { target: { value: text } });
   fireEvent.keyDown(textarea, { key: 'Enter' });
 }
@@ -60,7 +60,11 @@ test('renders nothing when closed', () => {
 
 test('shows the empty-state hint before any question is asked', () => {
   render(<SearchOverlay open onClose={() => {}} />);
-  assert.ok(screen.getByText('Ask a question about staff leave/WFH, the user directory, or your own requests to get started.'));
+  assert.ok(
+    screen.getByText(
+      'Ask a question about leave/WFH, the directory, departments, projects, holidays, your requests, balances, approvals, or visitors to get started.',
+    ),
+  );
 });
 
 test('sending a question renders the user bubble, a thinking state, then the assistant reply', async () => {
@@ -128,6 +132,73 @@ test('renders an absence row table under the assistant bubble when rows are pres
   assert.ok(screen.getByText('Leave'));
 });
 
+test('renders a project row table with a colored status pill when rows are present', async () => {
+  stubSmartSearch({
+    reply: 'Here is the project.',
+    toolUsed: 'queryProjects',
+    denied: false,
+    rows: [
+      {
+        id: 'proj-1',
+        name: 'Atlas',
+        status: 'active',
+        pm: { id: 'user-1', name: 'Jane Doe' },
+        techLead: null,
+        members: [],
+        memberCount: 4,
+      },
+    ],
+  });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('tell me about project atlas');
+  await screen.findByText('Here is the project.');
+  assert.ok(screen.getByText('Atlas'));
+  assert.ok(screen.getByText('Jane Doe'));
+  assert.ok(screen.getByText('Active'));
+});
+
+test('renders a leave balance row table with the computed remaining column', async () => {
+  stubSmartSearch({
+    reply: 'Here is your balance.',
+    toolUsed: 'queryMyLeaveBalances',
+    denied: false,
+    rows: [{ leaveTypeId: 'lt-1', leaveTypeName: 'Annual Leave', used: 4, total: 12 }],
+  });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('what is my leave balance');
+  await screen.findByText('Here is your balance.');
+  assert.ok(screen.getByText('Annual Leave'));
+  assert.ok(screen.getByText('8'));
+});
+
+test('renders a front-desk visitor row table when rows are present', async () => {
+  stubSmartSearch({
+    reply: 'One visitor is on-site.',
+    toolUsed: 'queryFrontDeskVisitors',
+    denied: false,
+    rows: [
+      {
+        requestId: 'req-1',
+        visitorName: 'Vera Visitor',
+        mobile: '9999999999',
+        hostName: 'Hank Host',
+        purpose: 'Demo',
+        visitDatetime: '2026-07-29T10:00:00.000Z',
+        outTime: null,
+        laptopDetails: null,
+        status: 'Checked-In',
+        checkInAt: '2026-07-29T10:05:00.000Z',
+        checkOutAt: null,
+      },
+    ],
+  });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask("who's on-site right now");
+  await screen.findByText('One visitor is on-site.');
+  assert.ok(screen.getByText('Vera Visitor'));
+  assert.ok(screen.getByText('Hank Host'));
+});
+
 test('an out-of-scope question gets the fixed decline reply, not a table', async () => {
   stubSmartSearch({
     reply: 'I can only help with information available in smartEnterprise.',
@@ -155,7 +226,7 @@ test('a failed request shows a retry-friendly error and Retry resends the same q
 
 test('Shift+Enter does not send the message', () => {
   render(<SearchOverlay open onClose={() => {}} />);
-  const textarea = screen.getByPlaceholderText('Ask about leave, WFH, the user directory, or your own requests…');
+  const textarea = screen.getByPlaceholderText('Ask about leave, WFH, departments, projects, holidays, or your own requests…');
   fireEvent.change(textarea, { target: { value: 'who is on leave' } });
   fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true });
   assert.equal(requests.length, 0);
@@ -171,7 +242,7 @@ test('the Esc badge closes the overlay', () => {
 test('clicking the scrim closes the overlay, clicking the panel does not', () => {
   let closeCount = 0;
   const { container } = render(<SearchOverlay open onClose={() => (closeCount += 1)} />);
-  fireEvent.click(screen.getByPlaceholderText('Ask about leave, WFH, the user directory, or your own requests…'));
+  fireEvent.click(screen.getByPlaceholderText('Ask about leave, WFH, departments, projects, holidays, or your own requests…'));
   assert.equal(closeCount, 0);
   fireEvent.click(container.firstElementChild as Element);
   assert.equal(closeCount, 1);
