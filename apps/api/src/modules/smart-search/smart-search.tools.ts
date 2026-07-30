@@ -8,6 +8,7 @@ import {
   orgUsersQuerySchema,
   projectStatus,
   projectsQuerySchema,
+  rolesQuerySchema,
   userStatus,
   type AbsenceEntryDto,
   type ApprovalQueueItemDto,
@@ -30,6 +31,7 @@ import { listHolidays } from '../holidays/holidays.service.js';
 import { getMyLeaveBalances } from '../leave-balances/leave-balances.service.js';
 import { listOrgUsers } from '../org-users/org-users.service.js';
 import { listProjects } from '../projects/projects.service.js';
+import { listRoles } from '../roles/roles.service.js';
 import { listApprovalQueue, listMyRequests } from '../requests/requests.service.js';
 import { searchDirectoryUsers } from '../directory/directory.service.js';
 
@@ -144,6 +146,10 @@ export const queryUsersArgsSchema = z.object({
   search: nullishString,
   status: userStatus.nullish().transform((v) => v ?? undefined),
   departmentId: nullishString,
+  // Free-text role name (e.g. "Project Manager", "HR Head", or a tenant's own custom role) —
+  // resolved to a tenant-scoped role id in the executor via a name search, same reasoning as
+  // queryAbsences' personName: never trusted as an id directly.
+  role: nullishString,
 });
 export type QueryUsersArgs = z.infer<typeof queryUsersArgsSchema>;
 
@@ -297,7 +303,7 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
   defineTool<QueryUsersArgs>({
     name: 'queryUsers',
     description:
-      'Answers questions about the tenant user directory — list, search, or filter employees by name/email, status, or department. Enterprise Admin only.',
+      'Answers questions about the tenant user directory — list, search, or filter employees by name/email, status, department, or role (e.g. "list all Project Managers", "who are the HR Heads", or any of the tenant\'s own custom roles). "Project Manager" here is a ROLE held by a person, not the queryProjects tool\'s PROJECT records — use this tool, not queryProjects, whenever the question is asking for people (a list of employees/managers), not named projects. Enterprise Admin only.',
     parameters: {
       type: 'object',
       properties: {
@@ -308,6 +314,11 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
           description: 'Optional filter by account status.',
         },
         departmentId: { type: 'string', description: 'Optional filter by department id.' },
+        role: {
+          type: 'string',
+          description:
+            'Optional filter by role name, e.g. "Project Manager", "Tech Lead", "HR Head", "Enterprise Admin", or a tenant\'s own custom role name.',
+        },
       },
       required: [],
     },
@@ -319,12 +330,21 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
       if (!viewer.roles.includes(SystemRoleKey.EnterpriseAdmin)) {
         throw new HttpError(403, 'Enterprise Admin access required');
       }
+      let roleId: string | undefined;
+      if (args.role) {
+        // Same tenant-scoped, name-based resolution pattern as queryAbsences' personName — the
+        // model only ever supplies free text, never an id.
+        const roleMatches = await listRoles(tenantId, rolesQuerySchema.parse({ search: args.role, archived: false }));
+        if (roleMatches.rows.length === 0) return []; // no matching role — narration reports no data found
+        roleId = roleMatches.rows[0].id;
+      }
       const query = orgUsersQuerySchema.parse({
         page: 1,
         pageSize: 25, // capped so the narration prompt and any rendered table stay small
         search: args.search,
         status: args.status,
         departmentId: args.departmentId,
+        roleId,
       });
       const result = await listOrgUsers(tenantId, query);
       return result.rows;
@@ -410,7 +430,7 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
   defineTool<QueryProjectsArgs>({
     name: 'queryProjects',
     description:
-      'Answers questions about the tenant\'s PROJECT master list — names, status (active/archived), PM, Tech Lead, and members (e.g. "what projects are active?", "who is the PM for Project Phoenix?"). NOT for who is on leave/WFH on a project (queryAbsences) or approvals awaiting the viewer (queryMyApprovals). Enterprise Admin, HR Head, Project Manager, or Tech Lead only.',
+      'Answers questions about the tenant\'s PROJECT master list — names, status (active/archived), and each named project\'s own PM/Tech Lead/members (e.g. "what projects are active?", "who is the PM for Project Phoenix?"). NOT for a tenant-wide list of everyone who holds the Project Manager (or any other) role — that\'s the user directory, use queryUsers instead. Also NOT for who is on leave/WFH on a project (queryAbsences) or approvals awaiting the viewer (queryMyApprovals). Enterprise Admin, HR Head, Project Manager, or Tech Lead only.',
     parameters: {
       type: 'object',
       properties: {

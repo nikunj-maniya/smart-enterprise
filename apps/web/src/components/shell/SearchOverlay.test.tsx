@@ -23,6 +23,7 @@ const realFetch = globalThis.fetch;
 beforeEach(() => {
   stubs = [];
   requests = [];
+  localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace('http://localhost:4000', '');
     const method = init?.method ?? 'GET';
@@ -246,4 +247,224 @@ test('clicking the scrim closes the overlay, clicking the panel does not', () =>
   assert.equal(closeCount, 0);
   fireEvent.click(container.firstElementChild as Element);
   assert.equal(closeCount, 1);
+});
+
+test('a sent question is saved under the conversationId the server returns, and later turns resume it', async () => {
+  stubSmartSearch({ reply: 'Nobody is on leave.', conversationId: 'conv-1', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('who is on leave next week');
+  await screen.findByText('Nobody is on leave.');
+  assert.equal(localStorage.getItem('smartSearch.activeConversationId'), 'conv-1');
+
+  stubSmartSearch({ reply: 'Bob is on WFH.', conversationId: 'conv-1', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  ask('anyone else?');
+  await screen.findByText('Bob is on WFH.');
+  assert.deepEqual(requests[1].body, {
+    message: 'anyone else?',
+    history: [
+      { role: 'user', content: 'who is on leave next week' },
+      { role: 'assistant', content: 'Nobody is on leave.' },
+    ],
+    conversationId: 'conv-1',
+  });
+});
+
+test('opening the overlay resumes the last active thread stored from a previous session', async () => {
+  localStorage.setItem('smartSearch.activeConversationId', 'conv-9');
+  stubs.push({
+    method: 'GET',
+    path: '/smart-search/conversations/conv-9',
+    status: 200,
+    body: {
+      id: 'conv-9',
+      title: 'who is on leave next week',
+      createdAt: '2026-07-29T10:00:00.000Z',
+      updatedAt: '2026-07-29T10:00:00.000Z',
+      messages: [
+        { id: 'm1', role: 'user', content: 'who is on leave next week', createdAt: '2026-07-29T10:00:00.000Z' },
+        { id: 'm2', role: 'assistant', content: 'Nobody is on leave.', createdAt: '2026-07-29T10:00:01.000Z' },
+      ],
+    },
+  });
+  render(<SearchOverlay open onClose={() => {}} />);
+  assert.ok(await screen.findByText('Nobody is on leave.'));
+  assert.ok(screen.getByText('who is on leave next week'));
+});
+
+test('the History view lists past threads and selecting one loads it back into the chat', async () => {
+  stubs.push({
+    method: 'GET',
+    path: '/smart-search/conversations?',
+    status: 200,
+    body: {
+      rows: [
+        { id: 'conv-1', title: 'who is on leave next week', createdAt: '2026-07-29T10:00:00.000Z', updatedAt: '2026-07-29T10:00:00.000Z' },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    },
+  });
+  stubs.push({
+    method: 'GET',
+    path: '/smart-search/conversations/conv-1',
+    status: 200,
+    body: {
+      id: 'conv-1',
+      title: 'who is on leave next week',
+      createdAt: '2026-07-29T10:00:00.000Z',
+      updatedAt: '2026-07-29T10:00:00.000Z',
+      messages: [
+        { id: 'm1', role: 'user', content: 'who is on leave next week', createdAt: '2026-07-29T10:00:00.000Z' },
+        { id: 'm2', role: 'assistant', content: 'Nobody is on leave.', createdAt: '2026-07-29T10:00:01.000Z' },
+      ],
+    },
+  });
+  render(<SearchOverlay open onClose={() => {}} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'View past conversations' }));
+  assert.ok(await screen.findByText('who is on leave next week'));
+
+  fireEvent.click(screen.getByText('who is on leave next week'));
+  assert.ok(await screen.findByText('Nobody is on leave.'));
+  assert.equal(localStorage.getItem('smartSearch.activeConversationId'), 'conv-1');
+});
+
+test('the History view shows an empty state when there are no past threads', async () => {
+  stubs.push({ method: 'GET', path: '/smart-search/conversations?', status: 200, body: { rows: [], total: 0, page: 1, pageSize: 20 } });
+  render(<SearchOverlay open onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: 'View past conversations' }));
+  assert.ok(await screen.findByText('No past conversations yet.'));
+});
+
+test('New conversation clears the thread and forgets the stored conversationId', async () => {
+  stubSmartSearch({ reply: 'Nobody is on leave.', conversationId: 'conv-1', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('who is on leave next week');
+  await screen.findByText('Nobody is on leave.');
+
+  fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
+  assert.equal(screen.queryByText('Nobody is on leave.') === null, true);
+  assert.equal(localStorage.getItem('smartSearch.activeConversationId'), null);
+  assert.ok(
+    screen.getByText(
+      'Ask a question about leave/WFH, the directory, departments, projects, holidays, your requests, balances, approvals, or visitors to get started.',
+    ),
+  );
+});
+
+test('the History view lets the caller delete a thread after confirming, removing it from the list', async () => {
+  stubs.push({
+    method: 'GET',
+    path: '/smart-search/conversations?',
+    status: 200,
+    body: {
+      rows: [
+        { id: 'conv-1', title: 'who is on leave next week', createdAt: '2026-07-29T10:00:00.000Z', updatedAt: '2026-07-29T10:00:00.000Z' },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    },
+  });
+  stubs.push({ method: 'DELETE', path: '/smart-search/conversations/conv-1', status: 204 });
+  render(<SearchOverlay open onClose={() => {}} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'View past conversations' }));
+  assert.ok(await screen.findByText('who is on leave next week'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation "who is on leave next week"' }));
+  assert.ok(screen.getByText('Delete conversation'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+  assert.ok(await screen.findByText('No past conversations yet.'));
+  assert.equal(requests.some((r) => r.method === 'DELETE' && r.path === '/smart-search/conversations/conv-1'), true);
+});
+
+test('Escape while the delete-confirm dialog is open closes only the dialog, not the whole Search overlay', async () => {
+  stubs.push({
+    method: 'GET',
+    path: '/smart-search/conversations?',
+    status: 200,
+    body: {
+      rows: [
+        { id: 'conv-1', title: 'who is on leave next week', createdAt: '2026-07-29T10:00:00.000Z', updatedAt: '2026-07-29T10:00:00.000Z' },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    },
+  });
+  let closed = false;
+  render(<SearchOverlay open onClose={() => (closed = true)} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'View past conversations' }));
+  assert.ok(await screen.findByText('who is on leave next week'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation "who is on leave next week"' }));
+  assert.ok(screen.getByText('Delete conversation'));
+
+  fireEvent.keyDown(window, { key: 'Escape' });
+
+  assert.equal(screen.queryByText('Delete conversation') === null, true);
+  assert.equal(closed, false);
+  assert.ok(screen.getByText('who is on leave next week'));
+});
+
+test('deleting the currently active thread from the History view also clears it from chat view and storage', async () => {
+  stubSmartSearch({ reply: 'Nobody is on leave.', conversationId: 'conv-1', toolUsed: 'queryAbsences', denied: false, rows: [] });
+  render(<SearchOverlay open onClose={() => {}} />);
+  ask('who is on leave next week');
+  await screen.findByText('Nobody is on leave.');
+  assert.equal(localStorage.getItem('smartSearch.activeConversationId'), 'conv-1');
+
+  stubs.push({
+    method: 'GET',
+    path: '/smart-search/conversations?',
+    status: 200,
+    body: {
+      rows: [
+        { id: 'conv-1', title: 'who is on leave next week', createdAt: '2026-07-29T10:00:00.000Z', updatedAt: '2026-07-29T10:00:00.000Z' },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    },
+  });
+  stubs.push({ method: 'DELETE', path: '/smart-search/conversations/conv-1', status: 204 });
+
+  fireEvent.click(screen.getByRole('button', { name: 'View past conversations' }));
+  await screen.findByText('who is on leave next week');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete conversation "who is on leave next week"' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  await screen.findByText('No past conversations yet.');
+  assert.equal(localStorage.getItem('smartSearch.activeConversationId'), null);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to conversation' }));
+  assert.ok(
+    screen.getByText(
+      'Ask a question about leave/WFH, the directory, departments, projects, holidays, your requests, balances, approvals, or visitors to get started.',
+    ),
+  );
+});
+
+test('the History view shows a retry-friendly error when the thread list fails to load', async () => {
+  render(<SearchOverlay open onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: 'View past conversations' }));
+  assert.ok(await screen.findByText('Something went wrong. Check your connection and try again.'));
+
+  stubs.push({
+    method: 'GET',
+    path: '/smart-search/conversations?',
+    status: 200,
+    body: {
+      rows: [
+        { id: 'conv-1', title: 'who is on leave next week', createdAt: '2026-07-29T10:00:00.000Z', updatedAt: '2026-07-29T10:00:00.000Z' },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    },
+  });
+  fireEvent.click(screen.getByText('Retry'));
+  assert.ok(await screen.findByText('who is on leave next week'));
 });

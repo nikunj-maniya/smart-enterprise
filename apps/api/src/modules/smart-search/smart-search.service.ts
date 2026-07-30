@@ -2,8 +2,10 @@ import type { AbsenceEntryDto, SmartSearchChatMessage, SmartSearchRequest, Smart
 import { prisma } from '../../prisma.js';
 import { HttpError } from '../../lib/http-error.js';
 import type { AuthedUser } from '../../middleware/auth.js';
-import { narrate, selectTool, type LlmChatMessage } from './llm-client.js';
+import { narrate, selectTool, summarizeConversation, type LlmChatMessage } from './llm-client.js';
 import { SMART_SEARCH_TOOLS, toIsoDate } from './smart-search.tools.js';
+import * as conversationService from './conversation.service.js';
+import * as memoryService from './memory.service.js';
 
 /** Fixed, hardcoded strings — never model-generated, never the raw error. Every permission
  *  denial across every domain/tool produces the exact same one decline string. */
@@ -14,14 +16,31 @@ const DECLINE_FORBIDDEN = "You don't have permission to view this information.";
 /** Bounds latency/prompt size — only the most recent turns of the thread are sent to the model. */
 const MAX_HISTORY_MESSAGES = 8;
 
+/** Once a persisted thread's unsummarized tail grows past this many messages, it gets compacted
+ *  (see `maybeCompact` below) — comfortably larger than `MAX_HISTORY_MESSAGES` so compaction only
+ *  fires occasionally on a long-running thread, not on every turn once it's crossed once. */
+const SUMMARIZE_AFTER_MESSAGES = 24;
+
 const SELECT_SYSTEM_PROMPT =
   'You are the smartEnterprise assistant. Decide, from the conversation, whether one of the provided tools can answer the latest user question. Only call a tool when it directly applies; otherwise call no tool.';
 
 const NARRATE_SYSTEM_PROMPT =
   'You are the smartEnterprise assistant. Using ONLY the structured data provided, give a short, plain-language answer to the question. Do not invent names, numbers, or dates that are not present in the data. If the data is empty, say so plainly.';
 
-function trimHistory(history: SmartSearchChatMessage[]): LlmChatMessage[] {
-  return history.slice(-MAX_HISTORY_MESSAGES).map((m) => ({ role: m.role, content: m.content }));
+function toLlmMessages(history: SmartSearchChatMessage[]): LlmChatMessage[] {
+  return history.map((m) => ({ role: m.role, content: m.content }));
+}
+
+/** Trims raw history to the most recent turns, then prepends the thread's rolling summary (if any)
+ *  as a synthetic leading turn — the compaction counterpart of `MAX_HISTORY_MESSAGES`'s sliding
+ *  window (see `maybeCompact` below and `SmartSearchConversation` in schema.prisma). */
+function buildModelHistory(rawMessages: LlmChatMessage[], summary: string | null): LlmChatMessage[] {
+  const recent = rawMessages.slice(-MAX_HISTORY_MESSAGES);
+  if (!summary) return recent;
+  return [
+    { role: 'assistant', content: `(Summary of earlier parts of this conversation, for context only: ${summary})` },
+    ...recent,
+  ];
 }
 
 /** Inclusive day count between two `YYYY-MM-DD` calendar days — computed here in application
@@ -67,24 +86,126 @@ async function logAudit(
   });
 }
 
+/** Persists a decline turn (no tool matched / unusable tool args) and returns the response the
+ *  caller sends back — the three early-decline call sites below only differ in audit metadata,
+ *  never in this shape. */
+async function persistDecline(
+  tenantId: string,
+  viewer: AuthedUser,
+  request: SmartSearchRequest,
+  replyText: string,
+): Promise<SmartSearchResponse> {
+  await logAudit(tenantId, viewer.id, null, false, request.message);
+  const conversationId = await conversationService.appendTurn(tenantId, viewer.id, request.conversationId, [
+    { role: 'user', content: request.message },
+    { role: 'assistant', content: replyText },
+  ]);
+  await maybeCompact(tenantId, viewer.id, conversationId);
+  return { reply: replyText, conversationId, toolUsed: null, denied: false, rows: [] };
+}
+
+/** Runs long-term-memory extraction once, at the end of a turn, sequentially — never concurrently
+ *  with the select/narrate calls already made for this same turn, same low-frequency guidance as
+ *  memory.service.ts's own docstring. Only called for a genuinely in-scope turn (a tool matched,
+ *  whether granted or denied) — an out-of-scope decline carries no data worth extracting from, and
+ *  skipping it there keeps the added-latency cost to turns that actually exercised the assistant.
+ *  Failures are swallowed: a broken extraction call must never fail the user's turn. */
+async function extractSafely(tenantId: string, userId: string, question: string, reply: string): Promise<void> {
+  try {
+    await memoryService.extractAndStoreMemories(tenantId, userId, [
+      { role: 'user', content: question },
+      { role: 'assistant', content: reply },
+    ]);
+  } catch {
+    // Best-effort — never let it fail the turn it rode in on.
+  }
+}
+
+/** Folds a thread's older messages into its rolling `summary` once the unsummarized tail grows
+ *  past `SUMMARIZE_AFTER_MESSAGES`, keeping only the most recent `MAX_HISTORY_MESSAGES` raw for
+ *  future turns — the write side of context management (see `SmartSearchConversation` in
+ *  schema.prisma). One extra local LLM call, but only on the rare turn that actually crosses the
+ *  threshold, so it stays infrequent even on a very long-running thread. Failures are swallowed,
+ *  same reasoning as `extractSafely` above — compaction is an optimization, never something the
+ *  user's reply depends on. */
+async function maybeCompact(tenantId: string, userId: string, conversationId: string): Promise<void> {
+  try {
+    const context = await conversationService.getConversationForOrchestration(tenantId, userId, conversationId);
+    if (context.messages.length <= SUMMARIZE_AFTER_MESSAGES) return;
+
+    const toFold = context.messages.slice(0, context.messages.length - MAX_HISTORY_MESSAGES);
+    if (toFold.length === 0) return;
+
+    const newSummary = await summarizeConversation(
+      context.summary,
+      toFold.map((m) => ({ role: m.role, content: m.content })),
+    );
+    await conversationService.compactConversation(
+      tenantId,
+      userId,
+      conversationId,
+      newSummary,
+      toFold[toFold.length - 1].createdAt,
+    );
+  } catch {
+    // Best-effort — never let it fail the turn it rode in on.
+  }
+}
+
 /**
  * POST /smart-search orchestration (tool-calling, never text-to-SQL/RAG):
- *  1. Ask the model to pick at most one tool from the static registry.
- *  2. No tool picked / unrecognized name → fixed out-of-scope decline, no further model call.
- *  3. Zod-validate the picked tool's args → invalid → same fixed decline, no retry.
- *  4. Call that tool's executor — tenantId/viewer always come from the authenticated request,
+ *  1. Load this turn's context — either a persisted thread's own stored history (resuming via
+ *     `conversationId`, server-trusted, the client's own `history` ignored) or the client-supplied
+ *     ephemeral `history` for a thread that hasn't been persisted yet.
+ *  2. On a thread's first turn, fetch this user's long-term memory and fold it into context.
+ *  3. Ask the model to pick at most one tool from the static registry.
+ *  4. No tool picked / unrecognized name → fixed out-of-scope decline, no further model call.
+ *  5. Zod-validate the picked tool's args → invalid → same fixed decline, no retry.
+ *  6. Call that tool's executor — tenantId/viewer always come from the authenticated request,
  *     never from the model's output.
- *  5. Executor throws HttpError(403) → fixed, generic permission-decline string, never the raw
+ *  7. Executor throws HttpError(403) → fixed, generic permission-decline string, never the raw
  *     error, never real data.
- *  6. Otherwise → one narration call over the structured result, then return it.
- * At most two model round-trips per question (tool-selection, then narration).
+ *  8. Otherwise → one narration call over the structured result, then return it.
+ * Every path persists the turn (so the thread survives refresh) and returns the thread's
+ * `conversationId`; a matched tool (denied or answered) also runs memory extraction and,
+ * infrequently, thread compaction — see `extractSafely`/`maybeCompact` above for why those are
+ * gated the way they are. At most two tool-calling-flow model round-trips per question
+ * (tool-selection, then narration) plus, occasionally, one more for extraction/compaction.
  */
 export async function handleSmartSearch(
   tenantId: string,
   viewer: AuthedUser,
   request: SmartSearchRequest,
 ): Promise<SmartSearchResponse> {
-  const history = trimHistory(request.history ?? []);
+  // Resuming a persisted thread: its own stored messages/summary are the source of truth, not the
+  // request's `history` field (see smartSearchRequestSchema's own comment in @se/shared). A brand
+  // new thread (no conversationId yet) uses the client-supplied ephemeral history instead.
+  let rawMessages: LlmChatMessage[];
+  let summary: string | null;
+  let isNewConversation: boolean;
+  if (request.conversationId) {
+    const context = await conversationService.getConversationForOrchestration(tenantId, viewer.id, request.conversationId);
+    rawMessages = context.messages.map((m) => ({ role: m.role, content: m.content }));
+    summary = context.summary;
+    isNewConversation = context.messages.length === 0;
+  } else {
+    rawMessages = toLlmMessages(request.history ?? []);
+    summary = null;
+    isNewConversation = rawMessages.length === 0;
+  }
+  const history = buildModelHistory(rawMessages, summary);
+
+  // Long-term memory is only retrieved/injected on a thread's first turn — cheap (no LLM call,
+  // just a scoped read) but folded into the same per-turn budget note as extraction/compaction:
+  // it only runs once per thread, not on every message.
+  let memoryPreamble = '';
+  if (isNewConversation) {
+    const memories = await memoryService.getMemoryContextForUser(tenantId, viewer.id);
+    if (memories.length > 0) {
+      memoryPreamble = `What you already know about this user, from past conversations: ${memories.join('; ')}.\n\n`;
+    }
+  }
+
   // The instruction is folded into the latest user turn rather than sent as a separate `system`
   // message: verified live against Ollama's OpenAI-compat endpoint that a `system` role message
   // combined with `tools` unreliably drops tool_calls entirely (confirmed reproducible, 0/3 runs
@@ -92,7 +213,7 @@ export async function handleSmartSearch(
   // narration is unaffected since that call never sends `tools`.
   const selectMessages: LlmChatMessage[] = [
     ...history,
-    { role: 'user', content: `${SELECT_SYSTEM_PROMPT}\n\nQuestion: ${request.message}` },
+    { role: 'user', content: `${memoryPreamble}${SELECT_SYSTEM_PROMPT}\n\nQuestion: ${request.message}` },
   ];
 
   const toolSchemas = SMART_SEARCH_TOOLS.map(({ name, description, parameters }) => ({
@@ -104,22 +225,19 @@ export async function handleSmartSearch(
   const matched = toolCall ? SMART_SEARCH_TOOLS.find((t) => t.name === toolCall.function.name) : undefined;
 
   if (!toolCall || !matched) {
-    await logAudit(tenantId, viewer.id, null, false, request.message);
-    return { reply: DECLINE_OUT_OF_SCOPE, toolUsed: null, denied: false, rows: [] };
+    return persistDecline(tenantId, viewer, request, DECLINE_OUT_OF_SCOPE);
   }
 
   let rawArgs: unknown;
   try {
     rawArgs = JSON.parse(toolCall.function.arguments);
   } catch {
-    await logAudit(tenantId, viewer.id, null, false, request.message);
-    return { reply: DECLINE_OUT_OF_SCOPE, toolUsed: null, denied: false, rows: [] };
+    return persistDecline(tenantId, viewer, request, DECLINE_OUT_OF_SCOPE);
   }
 
   const parsedArgs = matched.argsSchema.safeParse(rawArgs);
   if (!parsedArgs.success) {
-    await logAudit(tenantId, viewer.id, null, false, request.message);
-    return { reply: DECLINE_OUT_OF_SCOPE, toolUsed: null, denied: false, rows: [] };
+    return persistDecline(tenantId, viewer, request, DECLINE_OUT_OF_SCOPE);
   }
 
   let rows: unknown[];
@@ -128,9 +246,21 @@ export async function handleSmartSearch(
   } catch (err) {
     if (err instanceof HttpError && err.status === 403) {
       await logAudit(tenantId, viewer.id, matched.name, true, request.message);
+      const conversationId = await conversationService.appendTurn(tenantId, viewer.id, request.conversationId, [
+        { role: 'user', content: request.message },
+        { role: 'assistant', content: DECLINE_FORBIDDEN },
+      ]);
+      await extractSafely(tenantId, viewer.id, request.message, DECLINE_FORBIDDEN);
+      await maybeCompact(tenantId, viewer.id, conversationId);
       // `rows: []` trivially satisfies either arm of the discriminated union below regardless of
       // which tool was denied — the cast just tells TS what the registry already guarantees.
-      return { reply: DECLINE_FORBIDDEN, toolUsed: matched.name, denied: true, rows: [] } as SmartSearchResponse;
+      return {
+        reply: DECLINE_FORBIDDEN,
+        conversationId,
+        toolUsed: matched.name,
+        denied: true,
+        rows: [],
+      } as SmartSearchResponse;
     }
     throw err;
   }
@@ -149,10 +279,16 @@ export async function handleSmartSearch(
     { role: 'system', content: NARRATE_SYSTEM_PROMPT },
     {
       role: 'user',
-      content: `Today's date is ${toIsoDate(new Date())}.\n\nQuestion: ${request.message}\n\nData (JSON):\n${JSON.stringify(narrationFacts)}`,
+      content: `${memoryPreamble}Today's date is ${toIsoDate(new Date())}.\n\nQuestion: ${request.message}\n\nData (JSON):\n${JSON.stringify(narrationFacts)}`,
     },
   ]);
 
   await logAudit(tenantId, viewer.id, matched.name, false, request.message);
-  return { reply, toolUsed: matched.name, denied: false, rows } as SmartSearchResponse;
+  const conversationId = await conversationService.appendTurn(tenantId, viewer.id, request.conversationId, [
+    { role: 'user', content: request.message },
+    { role: 'assistant', content: reply },
+  ]);
+  await extractSafely(tenantId, viewer.id, request.message, reply);
+  await maybeCompact(tenantId, viewer.id, conversationId);
+  return { reply, conversationId, toolUsed: matched.name, denied: false, rows } as SmartSearchResponse;
 }

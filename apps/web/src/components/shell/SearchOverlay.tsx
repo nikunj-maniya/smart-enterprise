@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Search, Send } from 'lucide-react';
+import { History, Search, Send, SquarePen } from 'lucide-react';
 import type {
   AbsenceEntryDto,
   ApprovalQueueItemDto,
@@ -10,15 +10,22 @@ import type {
   OrgUserDto,
   ProjectDto,
   RequestListItemDto,
+  SmartSearchConversationMessageDto,
 } from '@se/shared';
 import { ABSENCE_TYPE_META, dateFromDay, formatDateRangeShort, formatDateShort } from '@/components/absences/absenceStyle';
 import { STATUS_STYLE } from '@/pages/organization/Projects';
 import { StatusBadge, TypeTile, requestTypeMeta } from '@/pages/requests/shared';
-import { askSmartSearch, type SmartSearchHistoryMessage, type SmartSearchResponse } from '@/lib/api';
+import { askSmartSearch, getSmartSearchConversation, type SmartSearchHistoryMessage, type SmartSearchResponse } from '@/lib/api';
+import { SearchHistoryList } from './SearchHistoryList';
 
 /** How many prior turns to send back as context for a follow-up question — bounds prompt size,
  *  matches the server's own trimming window. */
 const HISTORY_WINDOW = 8;
+
+/** Persists the id of the thread currently open in the overlay so it can be resumed after a page
+ *  refresh — just enough to know *which* thread to reload; the messages themselves always come
+ *  from the server, never from localStorage. */
+const ACTIVE_CONVERSATION_KEY = 'smartSearch.activeConversationId';
 
 // Plain `Omit` doesn't distribute over a union (it flattens `SmartSearchResponse` to its common
 // keys, losing the `toolUsed`/`rows` correlation) — this variant re-distributes over each member.
@@ -309,6 +316,15 @@ function FrontDeskRows({ rows }: { rows: FrontDeskVisitorDto[] }) {
   );
 }
 
+/** A persisted thread message, as loaded from the history API, doesn't carry `toolUsed`/`rows` (see
+ *  `SmartSearchConversationMessageDto` in schema.prisma) — reconstructed as the "no tool matched"
+ *  shape of `ChatMessage` so it renders as a plain bubble with no row table underneath. */
+function toChatMessage(m: SmartSearchConversationMessageDto, conversationId: string): ChatMessage {
+  return m.role === 'user'
+    ? { id: m.id, role: 'user', content: m.content }
+    : { id: m.id, role: 'assistant', content: m.content, conversationId, toolUsed: null, denied: false, rows: [] };
+}
+
 function MessageRows({ message }: { message: ChatMessage }) {
   if (message.role !== 'assistant' || !message.rows || message.rows.length === 0) return null;
   if (message.toolUsed === 'queryAbsences') return <AbsenceRows rows={message.rows} />;
@@ -334,8 +350,12 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
   const [retryable, setRetryable] = React.useState<{ message: string; history: SmartSearchHistoryMessage[] } | null>(
     null,
   );
+  const [conversationId, setConversationId] = React.useState<string | undefined>(undefined);
+  const [view, setView] = React.useState<'chat' | 'history'>('chat');
+  const [restoring, setRestoring] = React.useState(false);
   const listRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const restoredRef = React.useRef(false);
 
   React.useEffect(() => {
     if (open) textareaRef.current?.focus();
@@ -355,11 +375,34 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  // Resume the last active thread across a page refresh, the first time the overlay is opened —
+  // not on every open, and not before the user has ever opened it, so a page load with search
+  // untouched costs no extra request.
+  React.useEffect(() => {
+    if (!open || restoredRef.current) return;
+    restoredRef.current = true;
+    const storedId = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+    if (!storedId) return;
+    setRestoring(true);
+    getSmartSearchConversation(storedId)
+      .then((detail) => {
+        setConversationId(detail.id);
+        setMessages(detail.messages.map((m) => toChatMessage(m, detail.id)));
+      })
+      .catch(() => localStorage.removeItem(ACTIVE_CONVERSATION_KEY))
+      .finally(() => setRestoring(false));
+  }, [open]);
+
+  React.useEffect(() => {
+    if (conversationId) localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId);
+  }, [conversationId]);
+
   async function fetchReply(message: string, history: SmartSearchHistoryMessage[]) {
     setPending(true);
     setError(null);
     try {
-      const { reply, ...rest } = await askSmartSearch(message, history);
+      const { reply, ...rest } = await askSmartSearch(message, history, conversationId);
+      setConversationId(rest.conversationId);
       const assistantMessage: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: reply, ...rest };
       setMessages((prev) => [...prev, assistantMessage]);
       setRetryable(null);
@@ -388,6 +431,42 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
     if (retryable) void fetchReply(retryable.message, retryable.history);
   }
 
+  /** Starts a fresh thread: the next message sent will have no `conversationId`, so the server
+   *  creates a brand-new one rather than appending to the one just left. */
+  function handleNewConversation() {
+    setMessages([]);
+    setConversationId(undefined);
+    setError(null);
+    setRetryable(null);
+    localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+    setView('chat');
+  }
+
+  async function handleSelectThread(id: string) {
+    setView('chat');
+    setError(null);
+    setRestoring(true);
+    try {
+      const detail = await getSmartSearchConversation(id);
+      setConversationId(detail.id);
+      setMessages(detail.messages.map((m) => toChatMessage(m, detail.id)));
+    } catch {
+      setError('Something went wrong. Check your connection and try again.');
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  /** A thread deleted from the history list may be the one currently open in chat view (or the
+   *  one persisted for resume-on-refresh) — clear it here so neither points at a thread that no
+   *  longer exists. */
+  function handleThreadDeleted(id: string) {
+    if (conversationId !== id) return;
+    setMessages([]);
+    setConversationId(undefined);
+    localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+  }
+
   if (!open) return null;
 
   return (
@@ -409,6 +488,24 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
             <div className="truncate text-[14px] font-semibold text-ink-900">Smart Search</div>
             <div className="truncate text-[12px] text-ink-400">Ask about leave/WFH, directory, departments, projects, holidays, requests, balances, approvals, or visitors</div>
           </div>
+          <button
+            type="button"
+            onClick={handleNewConversation}
+            disabled={view === 'chat' && !conversationId && messages.length === 0}
+            aria-label="New conversation"
+            className="flex-none rounded-[7px] p-[6px] text-ink-400 hover:bg-surface-muted hover:text-ink-700 disabled:opacity-40"
+          >
+            <SquarePen size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setView((v) => (v === 'history' ? 'chat' : 'history'))}
+            aria-label={view === 'history' ? 'Back to conversation' : 'View past conversations'}
+            aria-pressed={view === 'history'}
+            className={`flex-none rounded-[7px] p-[6px] hover:bg-surface-muted ${view === 'history' ? 'text-brand' : 'text-ink-400 hover:text-ink-700'}`}
+          >
+            <History size={16} />
+          </button>
           <span
             className="cursor-pointer rounded-md border border-line px-[7px] py-[3px] text-[11px] font-semibold text-ink-400"
             onClick={onClose}
@@ -417,38 +514,52 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
           </span>
         </div>
 
-        <div ref={listRef} className="max-h-[420px] min-h-[160px] overflow-y-auto px-[18px] py-4">
-          {messages.length === 0 && !pending && (
-            <div className="px-[18px] py-8 text-center text-[13px] text-ink-400">
-              Ask a question about leave/WFH, the directory, departments, projects, holidays, your requests, balances, approvals, or visitors to get started.
-            </div>
-          )}
-          <div className="flex flex-col gap-3">
-            {messages.map((m) => (
-              <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                <div
-                  className={
-                    m.role === 'user'
-                      ? 'max-w-[85%] rounded-[14px] rounded-tr-[4px] bg-brand px-4 py-3 text-[14px] text-brand-ink'
-                      : 'max-w-[85%] rounded-[14px] rounded-tl-[4px] bg-surface-muted px-4 py-3 text-[14px] text-ink-900'
-                  }
-                >
-                  <div className="whitespace-pre-wrap">{m.content}</div>
-                  <MessageRows message={m} />
-                </div>
-              </div>
-            ))}
-            {pending && (
-              <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-[14px] rounded-tl-[4px] bg-surface-muted px-4 py-3 text-[13px] text-ink-400">
-                  Thinking…
-                </div>
+        {view === 'history' ? (
+          <div className="max-h-[420px] min-h-[160px] overflow-y-auto">
+            <SearchHistoryList onSelect={handleSelectThread} onDeleted={handleThreadDeleted} />
+          </div>
+        ) : (
+          <div
+            ref={listRef}
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+            className="max-h-[420px] min-h-[160px] overflow-y-auto px-[18px] py-4"
+          >
+            {restoring && <div className="px-[18px] py-8 text-center text-[13px] text-ink-400">Loading…</div>}
+            {!restoring && messages.length === 0 && !pending && (
+              <div className="px-[18px] py-8 text-center text-[13px] text-ink-400">
+                Ask a question about leave/WFH, the directory, departments, projects, holidays, your requests, balances, approvals, or visitors to get started.
               </div>
             )}
+            <div className="flex flex-col gap-3">
+              {!restoring &&
+                messages.map((m) => (
+                  <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                    <div
+                      className={
+                        m.role === 'user'
+                          ? 'max-w-[85%] rounded-[14px] rounded-tr-[4px] bg-brand px-4 py-3 text-[14px] text-brand-ink'
+                          : 'max-w-[85%] rounded-[14px] rounded-tl-[4px] bg-surface-muted px-4 py-3 text-[14px] text-ink-900'
+                      }
+                    >
+                      <div className="whitespace-pre-wrap">{m.content}</div>
+                      <MessageRows message={m} />
+                    </div>
+                  </div>
+                ))}
+              {pending && (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-[14px] rounded-tl-[4px] bg-surface-muted px-4 py-3 text-[13px] text-ink-400">
+                    Thinking…
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {error && (
+        {view === 'chat' && error && (
           <div className="flex items-center justify-between gap-3 border-t border-line-soft px-[18px] py-[10px] text-[13px] text-danger">
             <span>{error}</span>
             <button type="button" onClick={handleRetry} className="flex-none font-semibold text-brand-hover">
@@ -457,31 +568,33 @@ export function SearchOverlay({ open, onClose }: { open: boolean; onClose: () =>
           </div>
         )}
 
-        <div className="flex items-end gap-[11px] border-t border-line-soft px-[18px] py-4">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            placeholder="Ask about leave, WFH, departments, projects, holidays, or your own requests…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            className="min-w-0 flex-1 resize-none border-none bg-transparent text-base text-ink-900 outline-none"
-          />
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={!input.trim() || pending}
-            aria-label="Send"
-            className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-brand text-brand-ink disabled:opacity-40"
-          >
-            <Send size={17} />
-          </button>
-        </div>
+        {view === 'chat' && (
+          <div className="flex items-end gap-[11px] border-t border-line-soft px-[18px] py-4">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              placeholder="Ask about leave, WFH, departments, projects, holidays, or your own requests…"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              className="min-w-0 flex-1 resize-none border-none bg-transparent text-base text-ink-900 outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!input.trim() || pending}
+              aria-label="Send"
+              className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-brand text-brand-ink disabled:opacity-40"
+            >
+              <Send size={17} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

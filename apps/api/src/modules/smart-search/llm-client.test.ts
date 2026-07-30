@@ -1,6 +1,6 @@
 import { after, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { narrate, selectTool } from './llm-client.js';
+import { extractMemories, narrate, selectTool } from './llm-client.js';
 
 /**
  * Thin-wrapper unit tests: stub `globalThis.fetch` directly (slack-client.test.ts pattern) rather
@@ -100,5 +100,53 @@ describe('narrate', () => {
     response = { ok: true, json: async () => ({ choices: [{ message: { content: null } }] }) };
 
     assert.equal(await narrate([{ role: 'user', content: 'x' }]), '');
+  });
+});
+
+describe('extractMemories', () => {
+  it('posts a plain chat completion (no tools) with the existing memories and conversation folded in', async () => {
+    await extractMemories([{ role: 'user', content: 'I prefer async standups' }], ['Works remote']);
+
+    assert.equal('tools' in calls[0].body, false);
+    const messages = calls[0].body.messages as Array<{ role: string; content: string }>;
+    assert.match(messages[1].content, /Works remote/);
+    assert.match(messages[1].content, /I prefer async standups/);
+  });
+
+  it('parses a clean JSON array response', async () => {
+    response = {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: '["Prefers async standups"]' } }] }),
+    };
+
+    assert.deepEqual(await extractMemories([], []), ['Prefers async standups']);
+  });
+
+  it('tolerates the model wrapping the array in prose/markdown fences', async () => {
+    response = {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'Here you go:\n```json\n["Prefers async standups"]\n```' } }],
+      }),
+    };
+
+    assert.deepEqual(await extractMemories([], []), ['Prefers async standups']);
+  });
+
+  it('returns an empty array for [] and for unparsable content, never throwing', async () => {
+    response = { ok: true, json: async () => ({ choices: [{ message: { content: '[]' } }] }) };
+    assert.deepEqual(await extractMemories([], []), []);
+
+    response = { ok: true, json: async () => ({ choices: [{ message: { content: 'not json at all' } }] }) };
+    assert.deepEqual(await extractMemories([], []), []);
+
+    response = { ok: true, json: async () => ({ choices: [{ message: { content: null } }] }) };
+    assert.deepEqual(await extractMemories([], []), []);
+  });
+
+  it('drops non-string entries rather than throwing', async () => {
+    response = { ok: true, json: async () => ({ choices: [{ message: { content: '["ok fact", 42, null]' } }] }) };
+
+    assert.deepEqual(await extractMemories([], []), ['ok fact']);
   });
 });

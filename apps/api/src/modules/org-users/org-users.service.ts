@@ -38,12 +38,13 @@ export async function listOrgUsers(
   tenantId: string,
   query: OrgUsersQuery,
 ): Promise<OrgUsersResponse> {
-  const { page, pageSize, search, status, departmentId } = query;
+  const { page, pageSize, search, status, departmentId, roleId } = query;
 
   const where: Prisma.UserWhereInput = {
     tenantId,
     ...(status ? { status: status as UserStatus } : {}),
     ...(departmentId ? { departments: { some: { departmentId } } } : {}),
+    ...(roleId ? { roles: { some: { roleId } } } : {}),
     ...(search
       ? {
           OR: [

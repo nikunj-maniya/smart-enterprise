@@ -29,6 +29,8 @@ import { frontDeskRouter } from './modules/front-desk/front-desk.routes.js';
 import { itemCatalogRouter } from './modules/item-catalog/item-catalog.routes.js';
 import { absencesRouter } from './modules/absences/absences.routes.js';
 import { smartSearchRouter } from './modules/smart-search/smart-search.routes.js';
+import { smartSearchConversationsRouter } from './modules/smart-search/conversation.routes.js';
+import { smartSearchMemoryRouter } from './modules/smart-search/memory.routes.js';
 import { slackConfigRouter } from './modules/slack/slack-config.routes.js';
 import { slackWebhookRouter } from './modules/slack/slack-webhook.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
@@ -108,6 +110,10 @@ app.use('/front-desk', frontDeskRouter);
 app.use('/item-catalog', itemCatalogRouter);
 app.use('/absences', absencesRouter);
 app.use('/smart-search', smartSearchRateLimiter, smartSearchRouter);
+// CRUD over persisted threads, not an LLM call — no smartSearchRateLimiter needed here.
+app.use('/smart-search/conversations', smartSearchConversationsRouter);
+// CRUD over already-stored facts, not an LLM call — no smartSearchRateLimiter needed here.
+app.use('/smart-search/memories', smartSearchMemoryRouter);
 app.use('/slack/config', slackConfigRouter);
 app.use('/slack/interactions', slackWebhookRouter);
 app.use('/reports', reportsRouter);

@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/shell/PageHeader';
 import { Button } from '@/components/ui/button';
 import { apiFetch, ApiError, getNotificationPreferences, updateNotificationPreference } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { MemoryPanel } from './MemoryPanel';
 
 function initials(name: string) {
   return name
@@ -372,6 +373,8 @@ export default function Profile() {
           </Button>
         </div>
       </div>
+
+      <MemoryPanel />
     </div>
   );
 }
