@@ -20,6 +20,7 @@ function buildApp() {
   app.post('/auth/reset-password', (_req, res) => res.json({ ok: true }));
   app.post('/public/self-registration/tok', (_req, res) => res.json({ ok: true }));
   app.post('/slack/interactions', (_req, res) => res.json({ ok: true }));
+  app.post('/registrations', (_req, res) => res.json({ ok: true }));
   app.use(errorHandler);
   return app;
 }
@@ -61,12 +62,17 @@ test('allows a Bearer-header request with no CSRF cookie/header at all (not cook
   assert.equal(res.status, 200);
 });
 
-for (const path of ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/forgot-password', '/auth/reset-password']) {
+for (const path of ['/auth/login', '/auth/refresh', '/auth/forgot-password', '/auth/reset-password', '/registrations']) {
   test(`exempts ${path} from the CSRF check`, async () => {
     const res = await request(buildApp()).post(path);
     assert.equal(res.status, 200);
   });
 }
+
+test('does NOT exempt /auth/logout — it is an authenticated call the frontend sends the CSRF header on', async () => {
+  const res = await request(buildApp()).post('/auth/logout');
+  assert.equal(res.status, 403);
+});
 
 test('exempts /public/* paths from the CSRF check', async () => {
   const res = await request(buildApp()).post('/public/self-registration/tok');

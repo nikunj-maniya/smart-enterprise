@@ -62,7 +62,10 @@ function toAuthUser(u: {
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
   const user = await prisma.user.findUnique({ where: { email }, include: withRolesAndTenant });
-  if (!user) throw new HttpError(401, 'Invalid email or password');
+  if (!user) {
+    await argon2.hash(password); // pad timing to match the real argon2.verify cost below — avoids a timing side-channel revealing whether the email exists
+    throw new HttpError(401, 'Invalid email or password');
+  }
   if (user.status === UserStatus.Pending) {
     throw new HttpError(403, 'Your account is awaiting approval by your administrator.');
   }
@@ -108,7 +111,9 @@ export async function changePassword(
 
 export async function requestPasswordReset(email: string): Promise<void> {
   const user = await prisma.user.findUnique({ where: { email } });
-  // Resolve the same way whether or not the account exists — avoids email enumeration.
+  // Resolve the same way whether or not the account exists — avoids email enumeration. No argon2
+  // op runs on either branch here (unlike login/registerViaToken), so there's no comparable
+  // per-request cost to pad — the only differential is one indexed insert, not worth padding.
   if (!user || user.status !== UserStatus.Active) return;
 
   const token = randomBytes(32).toString('hex');
