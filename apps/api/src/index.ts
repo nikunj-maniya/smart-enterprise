@@ -109,11 +109,13 @@ app.use('/leave-balances', leaveBalancesRouter);
 app.use('/front-desk', frontDeskRouter);
 app.use('/item-catalog', itemCatalogRouter);
 app.use('/absences', absencesRouter);
-app.use('/smart-search', smartSearchRateLimiter, smartSearchRouter);
-// CRUD over persisted threads, not an LLM call — no smartSearchRateLimiter needed here.
+// Mounted before '/smart-search' below — Express matches app.use by path prefix, so if the
+// rate-limited '/smart-search' mount came first, it would also catch these paths (and the
+// smartSearchRateLimiter would run on them before falling through). CRUD over persisted
+// threads/facts, not an LLM call — no smartSearchRateLimiter needed here.
 app.use('/smart-search/conversations', smartSearchConversationsRouter);
-// CRUD over already-stored facts, not an LLM call — no smartSearchRateLimiter needed here.
 app.use('/smart-search/memories', smartSearchMemoryRouter);
+app.use('/smart-search', smartSearchRateLimiter, smartSearchRouter);
 app.use('/slack/config', slackConfigRouter);
 app.use('/slack/interactions', slackWebhookRouter);
 app.use('/reports', reportsRouter);
