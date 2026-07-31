@@ -4,8 +4,15 @@ info:
   description: >
     Full endpoint surface for the Smart Enterprise API. Conventions that hold
     everywhere unless an operation says otherwise: all endpoints except the ones
-    explicitly marked "public" require `Authorization: Bearer <accessToken>`
-    (obtained via POST /auth/login); tenant-scoped endpoints operate on the
+    explicitly marked "public" require authentication. POST /auth/login sets
+    httpOnly `se_access`/`se_refresh` session cookies (the browser app's auth
+    mechanism) plus a non-httpOnly `se_csrf` cookie that must be echoed back as
+    an `X-CSRF-Token` header on every mutating request riding those cookies; no
+    token is ever returned in a response body. A raw `Authorization: Bearer
+    <token>` header is also still accepted (e.g. a token lifted from the
+    `se_access` cookie) for non-browser/tooling clients, which are exempt from
+    the CSRF check since a cross-site page can't forge a custom header.
+    Tenant-scoped endpoints operate on the
     caller's own tenant only (cross-tenant ids read as 404, not 403); list
     endpoints paginate via `page`/`pageSize` query params and return
     `{ rows, total, page, pageSize }`; every mutating endpoint writes an
@@ -227,13 +234,10 @@ paths:
               properties: { refreshToken: { type: string } }
       responses:
         '200':
-          description: New token pair.
+          description: New token pair set as cookies (not returned in the body).
           content:
             application/json:
-              schema:
-                type: object
-                required: [accessToken, refreshToken]
-                properties: { accessToken: { type: string }, refreshToken: { type: string } }
+              schema: { type: object, required: [ok], properties: { ok: { type: boolean, enum: [true] } } }
         '400':
           description: refreshToken missing from body.
           content:
@@ -2713,11 +2717,9 @@ components:
         roles: { type: array, items: { type: string } }
     LoginResponse:
       type: object
-      required: [user, accessToken, refreshToken]
+      required: [user]
       properties:
         user: { $ref: '#/components/schemas/AuthUser' }
-        accessToken: { type: string }
-        refreshToken: { type: string }
 
     # ── Registrations ──
     RegisterEnterpriseRequest:
