@@ -8,7 +8,11 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 // CSRF-exploitable in the first place — a cross-site page can't make the victim's browser attach
 // a custom Authorization header. Only requests riding the browser's auto-attached auth cookies
 // need the double-submit check, so this list only needs to cover cookie-driven, pre-session paths.
-const EXEMPT_PATHS = new Set(['/auth/login', '/auth/refresh', '/auth/logout', '/auth/forgot-password', '/auth/reset-password']);
+// `/auth/logout` is NOT here: it's an authenticated call the frontend already makes via apiFetch,
+// which attaches the CSRF header like any other mutating request — no pre-session exemption needed.
+// `/registrations` (public "register your enterprise" submission) IS here: it's unauthenticated
+// and pre-session like the /auth/* entries above, so no se_csrf cookie exists yet to echo back.
+const EXEMPT_PATHS = new Set(['/auth/login', '/auth/refresh', '/auth/forgot-password', '/auth/reset-password', '/registrations']);
 
 /**
  * Double-submit-cookie CSRF check (security audit finding #6): now that the browser app's tokens

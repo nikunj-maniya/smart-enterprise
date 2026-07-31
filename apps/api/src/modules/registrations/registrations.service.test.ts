@@ -218,26 +218,20 @@ describe('submitRegistration', () => {
     assert.equal(calls.transactions, 0);
   });
 
-  it('rejects with 409 when the email belongs to a previously rejected user', async () => {
+  it('resolves the same way as a real submission when the email belongs to a previously rejected user (avoids enumeration)', async () => {
     existingUserByEmail = { status: UserStatus.Inactive };
 
-    await assert.rejects(submitRegistration(submitInput), (err: unknown) => {
-      assert.ok(err instanceof HttpError);
-      assert.equal(err.status, 409);
-      assert.equal(err.message, 'This email was previously rejected and cannot be used again.');
-      return true;
-    });
+    const result = await submitRegistration(submitInput);
+    assert.ok(typeof result.id === 'string' && result.id.length > 0);
+    assert.equal(calls.transactions, 0);
   });
 
-  it('rejects with 409 when the email is already registered (any other status)', async () => {
+  it('resolves the same way as a real submission when the email is already registered (any other status, avoids enumeration)', async () => {
     existingUserByEmail = { status: UserStatus.Active };
 
-    await assert.rejects(submitRegistration(submitInput), (err: unknown) => {
-      assert.ok(err instanceof HttpError);
-      assert.equal(err.status, 409);
-      assert.equal(err.message, 'This email is already registered.');
-      return true;
-    });
+    const result = await submitRegistration(submitInput);
+    assert.ok(typeof result.id === 'string' && result.id.length > 0);
+    assert.equal(calls.transactions, 0);
   });
 
   it('creates the tenant, user, and registration inside a transaction, and notifies admins', async () => {

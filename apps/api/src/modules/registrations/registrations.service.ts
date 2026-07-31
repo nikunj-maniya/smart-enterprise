@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import argon2 from 'argon2';
 import { Prisma, TenantStatus, UserStatus } from '@prisma/client';
 import type {
@@ -55,11 +56,12 @@ export async function submitRegistration(
   }
 
   const existing = await prisma.user.findUnique({ where: { email: input.contactEmail } });
+  // Resolve the same way whether or not the email is already registered — avoids email
+  // enumeration, same pattern as requestPasswordReset/registerViaToken. The frontend never reads
+  // the returned id (it only shows a static "submitted" confirmation), so a random one is fine.
   if (existing) {
-    if (existing.status === UserStatus.Inactive) {
-      throw new HttpError(409, 'This email was previously rejected and cannot be used again.');
-    }
-    throw new HttpError(409, 'This email is already registered.');
+    await argon2.hash(input.password); // pad timing to match the real-path cost below
+    return { id: randomUUID() };
   }
 
   const passwordHash = await argon2.hash(input.password);

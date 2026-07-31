@@ -105,7 +105,10 @@ export async function registerViaToken(
   // Resolve the same way whether or not the email is already registered — avoids email
   // enumeration, same pattern as requestPasswordReset.
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
-  if (existing) return;
+  if (existing) {
+    await argon2.hash(input.password); // pad timing to match the real argon2.hash cost below
+    return;
+  }
 
   const employeeRole = await prisma.role.findUnique({
     where: { tenantId_key: { tenantId: link.tenantId, key: SystemRoleKey.Employee } },
