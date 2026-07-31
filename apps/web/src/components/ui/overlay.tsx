@@ -24,6 +24,11 @@ export function Overlay({
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Capture phase + stopImmediatePropagation: takes precedence over any ancestor's own
+        // window-level Escape listener (e.g. a page-level overlay this one is nested inside) and
+        // over any other Overlay instance also mounted on window (nested confirm-on-confirm), so
+        // Escape only ever closes the topmost dialog, never cascades to whatever's beneath it.
+        e.stopImmediatePropagation();
         onClose();
         return;
       }
@@ -39,9 +44,9 @@ export function Overlay({
         firstEl.focus();
       }
     };
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     return () => {
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
       if (triggerRef.current instanceof HTMLElement) triggerRef.current.focus();
     };
   }, [onClose]);

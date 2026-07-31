@@ -1,4 +1,4 @@
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SystemRoleKey,
@@ -7,6 +7,7 @@ import {
   type FrontDeskVisitorDto,
   type HolidayDto,
   type LeaveBalanceDto,
+  type OrgUserDto,
   type ProjectDto,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
@@ -430,5 +431,86 @@ describe('queryFrontDeskVisitors', () => {
     assert.equal(rows[0].visitorName, 'Vera Visitor');
     assert.equal(rows[0].hostName, 'Hank Host');
     assert.equal(rows[1].checkInAt !== null, true);
+  });
+});
+
+describe('queryUsers', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryUsers')!;
+  const ADMIN = viewer('admin1', [SystemRoleKey.EnterpriseAdmin]);
+  const noArgs = { search: undefined, status: undefined, departmentId: undefined, role: undefined };
+
+  let userRows: {
+    id: string;
+    name: string;
+    email: string;
+    status: string;
+    roles: { role: { id: string; name: string } }[];
+    departments: never[];
+    createdAt: Date;
+  }[] = [];
+  let roleRows: { id: string; name: string; isSystem: boolean; permissions: string[]; archived: boolean; _count: { users: number } }[] = [];
+
+  // Every other describe block in this file registers its `prisma.<model>` mock once, at the top
+  // level, which permanently overwrites the shared prisma singleton for the rest of the file (see
+  // the queryFrontDeskVisitors comment above) — a real test-isolation bug this file has already hit
+  // once. Saving/restoring the descriptor in beforeEach/afterEach instead keeps this block's mocks
+  // scoped to its own tests, whichever position it runs in.
+  let origUser: PropertyDescriptor | undefined;
+  let origRole: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    userRows = [];
+    roleRows = [];
+    origUser = Object.getOwnPropertyDescriptor(prisma, 'user');
+    origRole = Object.getOwnPropertyDescriptor(prisma, 'role');
+    Object.defineProperty(prisma, 'user', {
+      value: { findMany: async () => userRows, count: async () => userRows.length },
+      configurable: true,
+    });
+    Object.defineProperty(prisma, 'role', {
+      value: { findMany: async () => roleRows, count: async () => roleRows.length },
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    if (origUser) Object.defineProperty(prisma, 'user', origUser);
+    if (origRole) Object.defineProperty(prisma, 'role', origRole);
+  });
+
+  it('an Employee (not Enterprise Admin) is denied with HttpError(403)', async () => {
+    await assert.rejects(
+      () => tool.execute('t1', EMPLOYEE, noArgs),
+      (err: unknown) => err instanceof HttpError && err.status === 403,
+    );
+  });
+
+  it('resolves a free-text role name to a role id and filters the directory by it', async () => {
+    roleRows = [
+      { id: 'role-pm', name: 'Project Manager', isSystem: true, permissions: [], archived: false, _count: { users: 1 } },
+    ];
+    userRows = [
+      {
+        id: 'u1',
+        name: 'Priya PM',
+        email: 'priya@x.com',
+        status: 'Active',
+        roles: [{ role: { id: 'role-pm', name: 'Project Manager' } }],
+        departments: [],
+        createdAt: new Date(),
+      },
+    ];
+    const rows = (await tool.execute('t1', ADMIN, { ...noArgs, role: 'project manager' })) as OrgUserDto[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, 'Priya PM');
+  });
+
+  it('returns no rows (not an error) when the given role name matches nothing', async () => {
+    roleRows = [];
+    userRows = [
+      { id: 'u1', name: 'Someone', email: 'x@x.com', status: 'Active', roles: [], departments: [], createdAt: new Date() },
+    ];
+    const rows = (await tool.execute('t1', ADMIN, { ...noArgs, role: 'not a real role' })) as OrgUserDto[];
+    assert.equal(rows.length, 0);
   });
 });

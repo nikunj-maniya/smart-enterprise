@@ -75,6 +75,19 @@ type UserRow = {
   departments: { department: { id: string; name: string } }[];
 };
 
+type ConversationRow = {
+  id: string;
+  tenantId: string;
+  userId: string;
+  title: string | null;
+  summary: string | null;
+  summarizedUntil: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+type MessageRow = { id: string; conversationId: string; role: string; content: string; createdAt: Date };
+type MemoryRow = { id: string; tenantId: string; userId: string; content: string; createdAt: Date; updatedAt: Date };
+
 let requestRows: RequestRow[] = [];
 let projectRows: {
   id: string;
@@ -87,6 +100,76 @@ let projectMemberRows: { projectId: string }[] = [];
 let userRows: UserRow[] = [];
 let userCount = 0;
 const auditCreateCalls: unknown[] = [];
+
+// smart-search.service.ts now also persists chat history (conversation.service.ts) and retrieves/
+// extracts long-term memory (memory.service.ts) — both stubbed here the same in-memory way as
+// conversation.service.test.ts / memory.service.test.ts do it for their own suites, since there's
+// no live Postgres in this environment.
+let conversationRows: ConversationRow[] = [];
+let messageRows: MessageRow[] = [];
+let memoryRows: MemoryRow[] = [];
+let nextConversationId = 1;
+let nextMessageId = 1;
+let nextMemoryId = 1;
+
+Object.defineProperty(prisma, 'smartSearchConversation', {
+  value: {
+    findUnique: async (args: { where: { id: string } }) => conversationRows.find((c) => c.id === args.where.id) ?? null,
+    create: async (args: { data: { tenantId: string; userId: string } }) => {
+      const row: ConversationRow = {
+        id: `c${nextConversationId++}`,
+        title: null,
+        summary: null,
+        summarizedUntil: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...args.data,
+      };
+      conversationRows.push(row);
+      return row;
+    },
+    update: async (args: { where: { id: string }; data: Partial<ConversationRow> }) => {
+      const row = conversationRows.find((c) => c.id === args.where.id)!;
+      Object.assign(row, args.data);
+      return row;
+    },
+  },
+  configurable: true,
+});
+Object.defineProperty(prisma, 'smartSearchMessage', {
+  value: {
+    findMany: async (args: { where: { conversationId: string; createdAt?: { gt: Date } } }) =>
+      messageRows
+        .filter(
+          (m) =>
+            m.conversationId === args.where.conversationId &&
+            (!args.where.createdAt || m.createdAt > args.where.createdAt.gt),
+        )
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+    createMany: async (args: { data: Array<{ conversationId: string; role: string; content: string }> }) => {
+      for (const d of args.data) {
+        messageRows.push({ id: `m${nextMessageId++}`, createdAt: new Date(), ...d });
+      }
+    },
+  },
+  configurable: true,
+});
+Object.defineProperty(prisma, 'smartSearchMemory', {
+  value: {
+    findMany: async (args: { where: { tenantId: string; userId: string } }) =>
+      memoryRows.filter((m) => m.tenantId === args.where.tenantId && m.userId === args.where.userId),
+    create: async (args: { data: { tenantId: string; userId: string; content: string } }) => {
+      const row: MemoryRow = { id: `mem${nextMemoryId++}`, createdAt: new Date(), updatedAt: new Date(), ...args.data };
+      memoryRows.push(row);
+      return row;
+    },
+  },
+  configurable: true,
+});
+Object.defineProperty(prisma, '$transaction', {
+  value: async (arg: unknown) => (Array.isArray(arg) ? Promise.all(arg) : (arg as (tx: unknown) => unknown)(prisma)),
+  configurable: true,
+});
 
 function utc(day: string): Date {
   return new Date(`${day}T00:00:00.000Z`);
@@ -140,6 +223,9 @@ beforeEach(() => {
   userRows = [];
   userCount = 0;
   auditCreateCalls.length = 0;
+  conversationRows = [];
+  messageRows = [];
+  memoryRows = [];
 });
 
 function viewer(id: string, roles: string[]): AuthedUser {
@@ -172,6 +258,12 @@ function noToolResponse() {
 
 function narrateResponse(content: string) {
   return { choices: [{ message: { content, tool_calls: [] } }] };
+}
+
+/** Canned "the extraction call proposed no new facts" response — queued for turns that reach
+ *  `extractSafely` (a tool matched, whether denied or answered; see smart-search.service.ts). */
+function noMemoriesExtractedResponse() {
+  return { choices: [{ message: { content: '[]', tool_calls: [] } }] };
 }
 
 function userRow(partial: Partial<UserRow> & Pick<UserRow, 'id' | 'name' | 'email'>): UserRow {
@@ -207,6 +299,7 @@ describe('handleSmartSearch — queryUsers (Enterprise Admin worked example)', (
     llmResponses = [
       toolCallResponse('queryUsers', {}),
       narrateResponse('Here is Alice Admin (alice@acme.test).'),
+      noMemoriesExtractedResponse(),
     ];
 
     const result = await handleSmartSearch('t1', ADMIN, { message: 'list users in my company' });
@@ -216,8 +309,9 @@ describe('handleSmartSearch — queryUsers (Enterprise Admin worked example)', (
     assert.equal(result.reply, 'Here is Alice Admin (alice@acme.test).');
     assert.equal(result.rows.length, 1);
     assert.equal((result.rows[0] as { name: string }).name, 'Alice Admin');
-    // Two model round-trips: tool-selection, then narration.
-    assert.equal(llmCalls.length, 2);
+    assert.ok(result.conversationId);
+    // Three model round-trips: tool-selection, narration, then (best-effort) memory extraction.
+    assert.equal(llmCalls.length, 3);
     assert.equal(auditCreateCalls.length, 1);
     assert.deepEqual((auditCreateCalls[0] as { data: { action: string } }).data.action, 'answered');
   });
@@ -227,7 +321,7 @@ describe('handleSmartSearch — queryUsers (Enterprise Admin worked example)', (
     userCount = 1;
     // The model still proposes the same tool call — the executor's own permission check is what
     // must reject it, regardless of what the model picks.
-    llmResponses = [toolCallResponse('queryUsers', {})];
+    llmResponses = [toolCallResponse('queryUsers', {}), noMemoriesExtractedResponse()];
 
     const result = await handleSmartSearch('t1', EMPLOYEE, { message: 'list users in my company' });
 
@@ -235,8 +329,9 @@ describe('handleSmartSearch — queryUsers (Enterprise Admin worked example)', (
     assert.equal(result.denied, true);
     assert.equal(result.toolUsed, 'queryUsers');
     assert.deepEqual(result.rows, []);
-    // Denial short-circuits before the narration call — only one model round-trip.
-    assert.equal(llmCalls.length, 1);
+    assert.ok(result.conversationId);
+    // Denial short-circuits before the narration call — tool-selection, then memory extraction.
+    assert.equal(llmCalls.length, 2);
     assert.equal((auditCreateCalls[0] as { data: { action: string } }).data.action, 'denied');
   });
 });
@@ -299,14 +394,14 @@ describe('handleSmartSearch — queryAbsences (HR / PM-TL scoped, Employee denie
   });
 
   it('an Employee with no absence-viewer role gets the generic decline string', async () => {
-    llmResponses = [toolCallResponse('queryAbsences', { range: 'next_week' })];
+    llmResponses = [toolCallResponse('queryAbsences', { range: 'next_week' }), noMemoriesExtractedResponse()];
 
     const result = await handleSmartSearch('t1', EMPLOYEE, { message: 'who is on leave next week' });
 
     assert.equal(result.reply, "You don't have permission to view this information.");
     assert.equal(result.denied, true);
     assert.deepEqual(result.rows, []);
-    assert.equal(llmCalls.length, 1);
+    assert.equal(llmCalls.length, 2);
   });
 
   it('a named colleague\'s leave status resolves the name to their requests, with no date given', async () => {
@@ -514,6 +609,140 @@ describe('handleSmartSearch — out-of-scope / no-match declines', () => {
     assert.equal(result.toolUsed, null);
     assert.match(result.reply, /I can only help with information available in smartEnterprise/);
     assert.equal(llmCalls.length, 1);
+  });
+});
+
+describe('handleSmartSearch — persistent history, memory injection, compaction', () => {
+  it('persists a brand-new thread and returns its conversationId, even on a decline', async () => {
+    llmResponses = [noToolResponse()];
+
+    const result = await handleSmartSearch('t1', EMPLOYEE, { message: "what's the weather today" });
+
+    assert.ok(result.conversationId);
+    assert.equal(conversationRows.length, 1);
+    assert.equal(conversationRows[0].id, result.conversationId);
+    assert.equal(messageRows.filter((m) => m.conversationId === result.conversationId).length, 2);
+  });
+
+  it('appends to the same thread on a second call with the returned conversationId', async () => {
+    llmResponses = [noToolResponse()];
+    const first = await handleSmartSearch('t1', EMPLOYEE, { message: 'first question' });
+
+    llmResponses = [noToolResponse()];
+    const second = await handleSmartSearch('t1', EMPLOYEE, {
+      message: 'second question',
+      conversationId: first.conversationId,
+    });
+
+    assert.equal(second.conversationId, first.conversationId);
+    assert.equal(conversationRows.length, 1);
+    assert.equal(messageRows.filter((m) => m.conversationId === first.conversationId).length, 4);
+  });
+
+  it('resuming a conversationId loads its persisted history instead of the request\'s own `history`', async () => {
+    conversationRows = [
+      {
+        id: 'c1',
+        tenantId: 't1',
+        userId: EMPLOYEE.id,
+        title: 'Existing thread',
+        summary: null,
+        summarizedUntil: null,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+    ];
+    messageRows = [
+      { id: 'm1', conversationId: 'c1', role: 'user', content: 'stored turn', createdAt: new Date('2026-07-01T00:00:01.000Z') },
+    ];
+    llmResponses = [noToolResponse()];
+
+    await handleSmartSearch('t1', EMPLOYEE, {
+      message: 'anything else?',
+      conversationId: 'c1',
+      history: [{ role: 'user', content: 'this should be ignored' }],
+    });
+
+    const selectCallBody = llmCalls[0].body as { messages: Array<{ content: string }> };
+    assert.ok(selectCallBody.messages.some((m) => m.content === 'stored turn'));
+    assert.ok(!selectCallBody.messages.some((m) => m.content === 'this should be ignored'));
+  });
+
+  it("rejects resuming another user's thread (ownership-checked the same as the conversation routes)", async () => {
+    conversationRows = [
+      {
+        id: 'c1',
+        tenantId: 't1',
+        userId: 'someone-else',
+        title: 'Not mine',
+        summary: null,
+        summarizedUntil: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ];
+
+    await assert.rejects(
+      () => handleSmartSearch('t1', EMPLOYEE, { message: 'hi', conversationId: 'c1' }),
+      /Conversation not found/,
+    );
+  });
+
+  it('injects remembered facts into the tool-selection call on a thread\'s first turn only', async () => {
+    memoryRows = [
+      { id: 'mem1', tenantId: 't1', userId: EMPLOYEE.id, content: 'Prefers WFH over office', createdAt: new Date(), updatedAt: new Date() },
+    ];
+    llmResponses = [noToolResponse()];
+
+    await handleSmartSearch('t1', EMPLOYEE, { message: 'anything to note?' });
+
+    const selectCallBody = llmCalls[0].body as { messages: Array<{ content: string }> };
+    assert.ok(selectCallBody.messages.some((m) => m.content.includes('Prefers WFH over office')));
+  });
+
+  it('does not re-inject memory once a thread already has history', async () => {
+    memoryRows = [
+      { id: 'mem1', tenantId: 't1', userId: EMPLOYEE.id, content: 'Prefers WFH over office', createdAt: new Date(), updatedAt: new Date() },
+    ];
+    llmResponses = [noToolResponse()];
+
+    await handleSmartSearch('t1', EMPLOYEE, {
+      message: 'follow-up',
+      history: [{ role: 'user', content: 'earlier turn' }],
+    });
+
+    const selectCallBody = llmCalls[0].body as { messages: Array<{ content: string }> };
+    assert.ok(!selectCallBody.messages.some((m) => m.content.includes('Prefers WFH over office')));
+  });
+
+  it('compacts a thread into a rolling summary once its unsummarized tail grows past the threshold', async () => {
+    conversationRows = [
+      {
+        id: 'c1',
+        tenantId: 't1',
+        userId: EMPLOYEE.id,
+        title: 'Long thread',
+        summary: null,
+        summarizedUntil: null,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+    ];
+    // 24 existing messages is exactly the compaction threshold — one more turn (2 messages) tips
+    // it over, so this exercises the summarization branch of maybeCompact.
+    messageRows = Array.from({ length: 24 }, (_, i) => ({
+      id: `m${i}`,
+      conversationId: 'c1',
+      role: (i % 2 === 0 ? 'user' : 'assistant') as string,
+      content: `turn ${i}`,
+      createdAt: new Date(2026, 6, 1, 0, 0, i),
+    }));
+    llmResponses = [noToolResponse(), narrateResponse('Rolled-up summary of the older turns.')];
+
+    await handleSmartSearch('t1', EMPLOYEE, { message: 'one more question', conversationId: 'c1' });
+
+    assert.equal(conversationRows[0].summary, 'Rolled-up summary of the older turns.');
+    assert.ok(conversationRows[0].summarizedUntil instanceof Date);
   });
 });
 

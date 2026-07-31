@@ -35,6 +35,12 @@ import type {
   SignedUrlResponse,
   SlackConfigDto,
   SmartSearchChatMessage,
+  SmartSearchConversationDetail,
+  SmartSearchConversationsQuery,
+  SmartSearchConversationsResponse,
+  SmartSearchMemoriesResponse,
+  SmartSearchMemoryDto,
+  SmartSearchMemoryUpdate,
   SmartSearchResponse,
   TransitionRequestInput,
   UpdateAbsenceCapRequest,
@@ -308,12 +314,54 @@ export type SmartSearchHistoryMessage = SmartSearchChatMessage;
 export type { SmartSearchResponse };
 
 /** `POST /smart-search` — ask the LLM-backed smart search assistant a natural-language question,
- *  passing recent chat history so it can answer follow-ups in the same thread. */
-export function askSmartSearch(message: string, history: SmartSearchHistoryMessage[] = []) {
+ *  passing recent chat history so it can answer follow-ups in the same thread. Pass `conversationId`
+ *  to resume a persisted thread (the server then loads its own stored history and ignores `history`);
+ *  omit it to start a new thread, whose id comes back on the response. */
+export function askSmartSearch(
+  message: string,
+  history: SmartSearchHistoryMessage[] = [],
+  conversationId?: string,
+) {
   return apiFetch<SmartSearchResponse>('/smart-search', {
     method: 'POST',
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, history, conversationId }),
   });
+}
+
+/** `GET /smart-search/conversations` — the caller's own Smart Search threads, newest first. */
+export function listSmartSearchConversations(query: Partial<SmartSearchConversationsQuery> = {}) {
+  const params = new URLSearchParams();
+  if (query.page) params.set('page', String(query.page));
+  if (query.pageSize) params.set('pageSize', String(query.pageSize));
+  return apiFetch<SmartSearchConversationsResponse>(`/smart-search/conversations?${params.toString()}`);
+}
+
+/** `GET /smart-search/conversations/:id` — one of the caller's own threads, messages oldest first. */
+export function getSmartSearchConversation(conversationId: string) {
+  return apiFetch<SmartSearchConversationDetail>(`/smart-search/conversations/${conversationId}`);
+}
+
+/** `DELETE /smart-search/conversations/:id` — permanently delete one of the caller's own threads. */
+export function deleteSmartSearchConversation(conversationId: string) {
+  return apiFetch<null>(`/smart-search/conversations/${conversationId}`, { method: 'DELETE' });
+}
+
+/** `GET /smart-search/memories` — facts/preferences the assistant has remembered about the caller. */
+export function listSmartSearchMemories() {
+  return apiFetch<SmartSearchMemoriesResponse>('/smart-search/memories');
+}
+
+/** `PATCH /smart-search/memories/:id` — edit the text of one remembered fact. */
+export function updateSmartSearchMemory(memoryId: string, body: SmartSearchMemoryUpdate) {
+  return apiFetch<SmartSearchMemoryDto>(`/smart-search/memories/${memoryId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+/** `DELETE /smart-search/memories/:id` — forget one remembered fact. */
+export function deleteSmartSearchMemory(memoryId: string) {
+  return apiFetch<null>(`/smart-search/memories/${memoryId}`, { method: 'DELETE' });
 }
 
 /** `GET /slack/config` (Enterprise Admin only) — the tenant's Slack integration status and settings. */

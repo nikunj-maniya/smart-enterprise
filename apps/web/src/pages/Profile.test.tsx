@@ -2,7 +2,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { NotificationPreferenceRow, ProfileDto } from '@se/shared';
+import type { NotificationPreferenceRow, ProfileDto, SmartSearchMemoryDto } from '@se/shared';
 import { AuthProvider } from '@/lib/auth';
 import Profile from './Profile';
 
@@ -71,10 +71,22 @@ const mandatoryRow: NotificationPreferenceRow = {
   slack: true,
 };
 
-function stubBase(p: ProfileDto = profile, rows: NotificationPreferenceRow[] = [prefRow, mandatoryRow]) {
+const memory: SmartSearchMemoryDto = {
+  id: 'mem-1',
+  content: 'Prefers to be reminded about leave requests a week in advance.',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
+
+function stubBase(
+  p: ProfileDto = profile,
+  rows: NotificationPreferenceRow[] = [prefRow, mandatoryRow],
+  memories: SmartSearchMemoryDto[] = [],
+) {
   stubs.push(
     { method: 'GET', path: '/profile', status: 200, body: p },
     { method: 'GET', path: '/profile/notification-preferences', status: 200, body: { rows } },
+    { method: 'GET', path: '/smart-search/memories', status: 200, body: { rows: memories } },
   );
 }
 
@@ -229,7 +241,61 @@ test('surfaces an error when the notification preferences fail to load', async (
       status: 500,
       body: { error: 'Unable to load notification preferences.' },
     },
+    { method: 'GET', path: '/smart-search/memories', status: 200, body: { rows: [] } },
   );
   renderPage();
   assert.ok(await screen.findByText('Unable to load notification preferences.'));
+});
+
+test('shows an empty state when no facts have been remembered', async () => {
+  stubBase();
+  renderPage();
+  assert.ok(await screen.findByText('No remembered facts yet.'));
+});
+
+test('lists remembered facts and edits one in place', async () => {
+  stubBase(profile, [prefRow, mandatoryRow], [memory]);
+  const updated = { ...memory, content: 'Prefers weekly leave reminders.' };
+  stubs.push({ method: 'PATCH', path: '/smart-search/memories/mem-1', status: 200, body: updated });
+  renderPage();
+  await screen.findByText(memory.content);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit this remembered fact' }));
+  const input = screen.getByLabelText('Edit remembered fact') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: updated.content } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  assert.ok(await screen.findByText(updated.content));
+  const patch = requests.find((r) => r.method === 'PATCH' && r.path === '/smart-search/memories/mem-1');
+  assert.deepEqual(patch!.body, { content: updated.content });
+});
+
+test('deletes a remembered fact after confirming', async () => {
+  stubBase(profile, [prefRow, mandatoryRow], [memory]);
+  stubs.push({ method: 'DELETE', path: '/smart-search/memories/mem-1', status: 204 });
+  renderPage();
+  await screen.findByText(memory.content);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Forget this fact' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Forget fact' }));
+
+  await waitFor(() => {
+    assert.ok(requests.some((r) => r.method === 'DELETE' && r.path === '/smart-search/memories/mem-1'));
+  });
+  assert.ok(await screen.findByText('No remembered facts yet.'));
+});
+
+test('surfaces an error when remembered facts fail to load', async () => {
+  stubs.push(
+    { method: 'GET', path: '/profile', status: 200, body: profile },
+    { method: 'GET', path: '/profile/notification-preferences', status: 200, body: { rows: [] } },
+    {
+      method: 'GET',
+      path: '/smart-search/memories',
+      status: 500,
+      body: { error: 'Unable to load remembered facts.' },
+    },
+  );
+  renderPage();
+  assert.ok(await screen.findByText('Unable to load remembered facts.'));
 });

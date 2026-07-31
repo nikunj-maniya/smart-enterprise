@@ -682,6 +682,7 @@ export const orgUsersQuerySchema = z.object({
   search: z.string().optional(),
   status: userStatus.optional(),
   departmentId: z.string().optional(),
+  roleId: z.string().optional(),
 });
 export type OrgUsersQuery = z.infer<typeof orgUsersQuerySchema>;
 
@@ -1472,10 +1473,13 @@ export const smartSearchChatMessageSchema = z.object({
 export type SmartSearchChatMessage = z.infer<typeof smartSearchChatMessageSchema>;
 
 /** `history` is the prior turns of the same thread; the server trims it to a small recent
- *  window before sending it to the model — this cap is just a request-size guardrail. */
+ *  window before sending it to the model — this cap is just a request-size guardrail.
+ *  `conversationId` resumes a persisted thread (its stored history is loaded server-side and
+ *  `history` is then ignored); omit it to start a new thread, whose id comes back on the response. */
 export const smartSearchRequestSchema = z.object({
   message: z.string().min(1).max(4000),
   history: z.array(smartSearchChatMessageSchema).max(20).optional(),
+  conversationId: z.string().optional(),
 });
 export type SmartSearchRequest = z.infer<typeof smartSearchRequestSchema>;
 
@@ -1494,70 +1498,148 @@ export type SmartSearchToolName = z.infer<typeof smartSearchToolNameSchema>;
 
 /** `toolUsed` is `null` when the model matched no tool (declined) or named an unrecognized one.
  *  `denied` is true only when a matched tool's executor rejected the viewer for permission — in
- *  that case `rows` is always empty regardless of which tool was involved. */
+ *  that case `rows` is always empty regardless of which tool was involved. `conversationId` is
+ *  always the persisted thread this turn was saved to — the caller's own on resume, or a
+ *  freshly-created one when the request omitted `conversationId`. */
 export const smartSearchResponseSchema = z.discriminatedUnion('toolUsed', [
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryAbsences'),
     denied: z.boolean(),
     rows: z.array(absenceEntryDtoSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryUsers'),
     denied: z.boolean(),
     rows: z.array(orgUserSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryMyRequests'),
     denied: z.boolean(),
     rows: z.array(requestListItemSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryDepartments'),
     denied: z.boolean(),
     rows: z.array(departmentSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryProjects'),
     denied: z.boolean(),
     rows: z.array(projectSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryHolidays'),
     denied: z.boolean(),
     rows: z.array(holidayDtoSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryMyLeaveBalances'),
     denied: z.boolean(),
     rows: z.array(leaveBalanceDtoSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryMyApprovals'),
     denied: z.boolean(),
     rows: z.array(approvalQueueItemSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal('queryFrontDeskVisitors'),
     denied: z.boolean(),
     rows: z.array(frontDeskVisitorDtoSchema),
   }),
   z.object({
     reply: z.string(),
+    conversationId: z.string(),
     toolUsed: z.literal(null),
     denied: z.boolean(),
     rows: z.tuple([]),
   }),
 ]);
 export type SmartSearchResponse = z.infer<typeof smartSearchResponseSchema>;
+
+/** One persisted message in a Smart Search conversation thread, as returned by the
+ *  conversation-detail endpoint — distinct from `smartSearchChatMessageSchema`, which is the
+ *  ephemeral shape a request carries as prior-turn context. */
+export const smartSearchConversationMessageSchema = z.object({
+  id: z.string(),
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  createdAt: z.string(),
+});
+export type SmartSearchConversationMessageDto = z.infer<typeof smartSearchConversationMessageSchema>;
+
+/** One row of the Smart Search thread-history list; `title` is derived server-side (e.g. from
+ *  the thread's first user message) when no explicit title was set. */
+export const smartSearchConversationSummarySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SmartSearchConversationSummaryDto = z.infer<typeof smartSearchConversationSummarySchema>;
+
+export const smartSearchConversationsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type SmartSearchConversationsQuery = z.infer<typeof smartSearchConversationsQuerySchema>;
+
+export const smartSearchConversationsResponseSchema = z.object({
+  rows: z.array(smartSearchConversationSummarySchema),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+});
+export type SmartSearchConversationsResponse = z.infer<typeof smartSearchConversationsResponseSchema>;
+
+/** Full thread detail returned when resuming a past conversation, messages oldest first. */
+export const smartSearchConversationDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  messages: z.array(smartSearchConversationMessageSchema),
+});
+export type SmartSearchConversationDetail = z.infer<typeof smartSearchConversationDetailSchema>;
+
+/** One fact/preference the assistant has inferred about the caller across conversations
+ *  (long-term memory) — strictly tenant- and user-scoped, never shared across users. */
+export const smartSearchMemorySchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SmartSearchMemoryDto = z.infer<typeof smartSearchMemorySchema>;
+
+export const smartSearchMemoriesResponseSchema = z.object({
+  rows: z.array(smartSearchMemorySchema),
+});
+export type SmartSearchMemoriesResponse = z.infer<typeof smartSearchMemoriesResponseSchema>;
+
+/** Body for editing a remembered fact's text in place. */
+export const smartSearchMemoryUpdateSchema = z.object({
+  content: z.string().trim().min(1).max(1000),
+});
+export type SmartSearchMemoryUpdate = z.infer<typeof smartSearchMemoryUpdateSchema>;
 
 export const attendanceReportQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Expected YYYY-MM'),
