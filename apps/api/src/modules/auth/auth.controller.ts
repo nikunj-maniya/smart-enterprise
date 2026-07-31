@@ -14,9 +14,9 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     const { email, password } = loginRequestSchema.parse(req.body);
     const result = await authService.login(email, password);
     setAuthCookies(res, result.accessToken, result.refreshToken);
-    // Tokens stay in the body too for Bearer-header clients (e2e fixtures, Swagger/Postman) —
-    // the web app itself never reads them back out; it relies on the cookies just set above.
-    res.json(result);
+    // Tokens travel only via the httpOnly cookies just set above — never in the response body,
+    // so an XSS payload can't steal them by reading/hooking the fetch response (finding #2).
+    res.json({ user: result.user });
   } catch (err) {
     next(err);
   }
@@ -65,7 +65,8 @@ export async function refresh(req: Request, res: Response, next: NextFunction) {
     if (!token) throw new HttpError(400, 'refreshToken is required');
     const result = await authService.refresh(token);
     setAuthCookies(res, result.accessToken, result.refreshToken);
-    res.json(result);
+    // Same as login — the new token pair travels only via cookies, never the body.
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
