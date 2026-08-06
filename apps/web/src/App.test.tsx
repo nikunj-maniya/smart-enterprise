@@ -33,14 +33,14 @@ function renderAt(initialPath: string) {
   );
 }
 
-test('/login resolves to the Login screen', () => {
+test('/login resolves to the Login screen', async () => {
   renderAt('/login');
-  assert.ok(screen.getByText('Welcome back'));
+  assert.ok(await screen.findByText('Welcome back'));
 });
 
-test('/register resolves to the Register screen', () => {
+test('/register resolves to the Register screen', async () => {
   renderAt('/register');
-  assert.ok(screen.getByText('Register your enterprise'));
+  assert.ok(await screen.findByText('Register your enterprise'));
 });
 
 test('an unknown path falls through the wildcard, hits Home, and lands on /login when signed out', async () => {

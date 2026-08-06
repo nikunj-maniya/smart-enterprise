@@ -158,13 +158,14 @@ export async function updateLeaveType(
     if (isPaid && !existing.isPaid) {
       const period = currentLeavePeriod();
       const users = await tx.user.findMany({ where: { tenantId, status: UserStatus.Active }, select: { id: true } });
-      for (const u of users) {
-        await tx.leaveBalance.upsert({
-          where: { userId_leaveTypeId_period: { userId: u.id, leaveTypeId: id, period } },
-          update: {},
-          create: { userId: u.id, leaveTypeId: id, period, balance: input.quota },
-        });
-      }
+      // A single batched insert instead of one upsert per user — the update side of that upsert
+      // was always `{}` (a no-op), so this is the same "create if missing" semantics without the
+      // N sequential round trips, which risked hitting Prisma's 5s interactive-transaction
+      // timeout for tenants with a few hundred+ active employees.
+      await tx.leaveBalance.createMany({
+        data: users.map((u) => ({ userId: u.id, leaveTypeId: id, period, balance: input.quota })),
+        skipDuplicates: true,
+      });
     }
     await tx.auditLog.create({
       data: {

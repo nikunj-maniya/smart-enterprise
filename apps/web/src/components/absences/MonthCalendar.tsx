@@ -1,3 +1,4 @@
+import * as React from 'react';
 import type { AbsenceEntryDto } from '@se/shared';
 import { ErrorState } from '@/pages/requests/shared';
 import { CALENDAR_TONE, rowOverlapsDate, toISODate } from './absenceStyle';
@@ -27,6 +28,20 @@ export function MonthCalendar({
   overCapDates?: Set<string>;
   onSelectDay: (dateIso: string, dayRows: AbsenceEntryDto[]) => void;
 }) {
+  // Pre-bucket rows by day once per data/grid change instead of re-filtering the full row list
+  // for each of the ~42 visible cells on every render (e.g. selecting a day, which doesn't
+  // change `rows`, was re-running all 42 filters for no reason).
+  const rowsByDay = React.useMemo(() => {
+    const map = new Map<string, AbsenceEntryDto[]>();
+    for (const week of weeks) {
+      for (const date of week) {
+        const dayIso = toISODate(date);
+        if (!map.has(dayIso)) map.set(dayIso, rows.filter((r) => rowOverlapsDate(r, dayIso)));
+      }
+    }
+    return map;
+  }, [weeks, rows]);
+
   if (error) return <ErrorState message={error} onRetry={onRetry} />;
 
   const today = toISODate(new Date());
@@ -64,7 +79,7 @@ export function MonthCalendar({
               const inMonth = date.getMonth() === month.getMonth();
               const isToday = dayIso === today;
               const isOverCap = overCapDates?.has(dayIso) ?? false;
-              const dayRows = rows.filter((r) => rowOverlapsDate(r, dayIso));
+              const dayRows = rowsByDay.get(dayIso) ?? [];
               const hasAbsence = dayRows.length > 0;
               const tone = isOverCap ? CALENDAR_TONE.overCap : CALENDAR_TONE.away;
 

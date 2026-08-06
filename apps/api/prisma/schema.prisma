@@ -54,23 +54,23 @@ model Tenant {
   status    TenantStatus @default(Pending)
   createdAt DateTime     @default(now())
 
-  users       User[]
-  departments Department[]
-  roles       Role[]
-  projects    Project[]
-  leaveTypes  LeaveType[]
-  forms       FormDefinition[]
-  requests    Request[]
-  notifications Notification[]
-  auditLogs   AuditLog[]
-  registration EnterpriseRegistration?
-  registrationLink RegistrationLink?
-  escalationRules EscalationRule[]
-  itemCatalog ItemCatalog[]
-  slackConfig SlackConfig?
-  holidays    Holiday[]
+  users                    User[]
+  departments              Department[]
+  roles                    Role[]
+  projects                 Project[]
+  leaveTypes               LeaveType[]
+  forms                    FormDefinition[]
+  requests                 Request[]
+  notifications            Notification[]
+  auditLogs                AuditLog[]
+  registration             EnterpriseRegistration?
+  registrationLink         RegistrationLink?
+  escalationRules          EscalationRule[]
+  itemCatalog              ItemCatalog[]
+  slackConfig              SlackConfig?
+  holidays                 Holiday[]
   smartSearchConversations SmartSearchConversation[]
-  smartSearchMemories SmartSearchMemory[]
+  smartSearchMemories      SmartSearchMemory[]
 }
 
 // Shareable employee self-registration link — at most one active link per tenant.
@@ -108,36 +108,37 @@ model EnterpriseRegistration {
 
 // ── Identity ───────────────────────────────────────────────
 model User {
-  id                 String     @id @default(cuid())
-  tenantId           String? // null = platform System Admin
-  name               String
-  email              String     @unique
-  passwordHash       String
-  status             UserStatus @default(Pending)
-  mustChangePassword Boolean    @default(false) // drives forced password change (resetPassword flag)
-  isSystemAdmin      Boolean    @default(false)
+  id                      String     @id @default(cuid())
+  tenantId                String? // null = platform System Admin
+  name                    String
+  email                   String     @unique
+  passwordHash            String
+  status                  UserStatus @default(Pending)
+  mustChangePassword      Boolean    @default(false) // drives forced password change (resetPassword flag)
+  isSystemAdmin           Boolean    @default(false)
   // Self-service profile fields (PRD §5A / Profile) — user-editable, optional.
-  phone              String?
-  jobTitle           String?
-  location           String?
+  phone                   String?
+  jobTitle                String?
+  location                String?
   // Per-user, per-channel notification preferences (reporting-and-polish): a sparse map of
   // `{ [notificationType]: { inApp?: boolean, slack?: boolean } }` — an absent type/channel
   // defaults to enabled; mandatory types (NOTIFICATION_TYPE_CATALOG) ignore this entirely.
   notificationPreferences Json?
-  createdAt          DateTime   @default(now())
+  createdAt               DateTime   @default(now())
 
-  tenant            Tenant?              @relation(fields: [tenantId], references: [id])
-  roles             UserRole[]
-  departments       UserDepartment[]
-  projectMembers    ProjectMember[]
-  leaveBalances     LeaveBalance[]
-  requests          Request[]
-  registration      EnterpriseRegistration?
-  resetTokens       PasswordResetToken[]
-  departmentHeads   DepartmentHead[]
-  refreshTokenSessions RefreshTokenSession[]
+  tenant                   Tenant?                   @relation(fields: [tenantId], references: [id])
+  roles                    UserRole[]
+  departments              UserDepartment[]
+  projectMembers           ProjectMember[]
+  leaveBalances            LeaveBalance[]
+  requests                 Request[]
+  registration             EnterpriseRegistration?
+  resetTokens              PasswordResetToken[]
+  departmentHeads          DepartmentHead[]
+  refreshTokenSessions     RefreshTokenSession[]
   smartSearchConversations SmartSearchConversation[]
-  smartSearchMemories SmartSearchMemory[]
+  smartSearchMemories      SmartSearchMemory[]
+  notifications            Notification[]
 
   @@index([tenantId])
 }
@@ -183,8 +184,8 @@ model Role {
   isSystem    Boolean  @default(false) // seeded System roles: renamable, permissions fixed, undeletable
   archived    Boolean  @default(false) // archived roles are hidden from assignment pickers, kept in history
 
-  tenant Tenant     @relation(fields: [tenantId], references: [id])
-  users  UserRole[]
+  tenant             Tenant           @relation(fields: [tenantId], references: [id])
+  users              UserRole[]
   escalationTargetOf EscalationRule[]
 
   @@unique([tenantId, key])
@@ -325,7 +326,7 @@ model FormDefinition {
 }
 
 model FormSection {
-  id               String  @id @default(cuid())
+  id               String @id @default(cuid())
   formDefinitionId String
   order            Int
   title            String
@@ -372,7 +373,7 @@ model StatusModel {
 // Hybrid storage: canonical `payload` JSONB + promoted typed columns for
 // cross-cutting queries (absence calendar, leave balance, dashboards).
 model Request {
-  id               String   @id @default(cuid())
+  id               String @id @default(cuid())
   tenantId         String
   formDefinitionId String
   formVersion      Int
@@ -381,13 +382,13 @@ model Request {
   payload          Json
 
   // Promoted typed columns
-  startDate     DateTime?
-  endDate       DateTime?
-  totalDays     Float?
-  halfDayCount  Float?
-  leaveTypeId   String?
-  departmentId  String?
-  projectId     String?
+  startDate    DateTime?
+  endDate      DateTime?
+  totalDays    Float?
+  halfDayCount Float?
+  leaveTypeId  String?
+  departmentId String?
+  projectId    String?
 
   // Leave/WFH flags computed server-side at submission (leave-wfh-requests) — never
   // client-supplied, never gate approval; surfaced to approvers/HR as badges.
@@ -407,9 +408,20 @@ model Request {
   statusHistory RequestStatusHistory[]
   visitor       Visitor?
 
-  @@index([tenantId])
   @@index([startDate, endDate])
-  @@index([requesterId])
+  // Supersede the old standalone [tenantId] / [requesterId] indexes: every hot-path query filters
+  // tenantId or requesterId together with status and sorts by createdAt (Fulfilment Queue, My
+  // Requests, Approvals Queue) — a leftmost-prefix match on either composite still serves a
+  // tenantId-only or requesterId-only lookup, so nothing is lost.
+  @@index([tenantId, status, createdAt])
+  @@index([requesterId, status, createdAt])
+  // Reports' date-range query filters tenantId + createdAt only (no status) — the composites
+  // above can't serve an efficient index-order sort in that shape, so this stays separate.
+  @@index([tenantId, createdAt])
+  // Department/Project deletion guards count Requests by these columns to block deleting one
+  // that's still referenced — unindexed until now, so each guard check was a full table scan.
+  @@index([departmentId])
+  @@index([projectId])
 }
 
 // Per-tenant software/hardware item master data (it-requests) — pickers on the IT form resolve
@@ -446,6 +458,9 @@ model RequestApprover {
   request Request @relation(fields: [requestId], references: [id])
 
   @@index([approverId, decision])
+  // requestId is the FK back to Request and the column virtually every approval query joins/
+  // filters on (decisions, transitions, request-detail loads) — unindexed until now.
+  @@index([requestId])
 }
 
 // Tenant-scoped escalation matrix (escalation-workflow spec): maps a `RequestApprover.roleContext`
@@ -477,14 +492,18 @@ model RequestStatusHistory {
   at        DateTime @default(now())
 
   request Request @relation(fields: [requestId], references: [id])
+
+  // Unindexed FK — hit by the Approvals Queue's "still awaitable" filter and the Fulfilment
+  // Queue's statusHistory include on every load.
+  @@index([requestId])
 }
 
 model Visitor {
-  id          String    @id @default(cuid())
-  requestId   String    @unique
-  checkInAt   DateTime?
-  checkOutAt  DateTime?
-  consent     Boolean   @default(false)
+  id                 String    @id @default(cuid())
+  requestId          String    @unique
+  checkInAt          DateTime?
+  checkOutAt         DateTime?
+  consent            Boolean   @default(false)
   // reporting-and-polish: signature captured at check-in, stored in MinIO — this column holds
   // only the object key (never a URL); retrieval is always through a fresh, short-lived signed
   // GET URL (lib/object-storage.ts), never a public path.
@@ -504,6 +523,11 @@ model Notification {
   createdAt DateTime @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
+  // Cascade: a notification is that user's inbox entry, not a record with independent value once
+  // the user is gone (unlike Request, which is deliberately kept and blocks deletion instead —
+  // see deleteOrgUser). Was previously not a real relation at all, so deleting a user left their
+  // notifications as silent orphans.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([userId, read])
@@ -522,7 +546,12 @@ model AuditLog {
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])
 
-  @@index([tenantId])
+  // Every page of the audit log is sorted by `at desc`; tenantId is an optional filter (System
+  // Admin can view unfiltered across tenants). [tenantId, at] serves the filtered case (and
+  // subsumes the old standalone [tenantId] index via its leftmost prefix); [at] alone serves the
+  // unfiltered, platform-wide view.
+  @@index([tenantId, at])
+  @@index([at])
 }
 
 // Singleton table — exactly one row (id = "singleton"), application-managed.
@@ -541,15 +570,15 @@ model PlatformSettings {
 // the interaction webhook route an unauthenticated payload to the right tenant's signing secret
 // before verifying it.
 model SlackConfig {
-  id                    String   @id @default(cuid())
-  tenantId              String   @unique
-  status                String   @default("disconnected") // disconnected | connected | error
-  workspaceName         String?
-  slackTeamId           String?
-  defaultChannel        String?
-  botTokenEncrypted     String?
+  id                     String  @id @default(cuid())
+  tenantId               String  @unique
+  status                 String  @default("disconnected") // disconnected | connected | error
+  workspaceName          String?
+  slackTeamId            String?
+  defaultChannel         String?
+  botTokenEncrypted      String?
   signingSecretEncrypted String?
-  lastErrorMessage      String?
+  lastErrorMessage       String?
 
   notifyApproversOnNewRequest   Boolean @default(true)
   notifyRequesterOnDecision     Boolean @default(true)

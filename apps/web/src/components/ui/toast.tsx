@@ -27,13 +27,18 @@ export function Toast({ message, variant = 'success' }: { message: string | null
 export function useToast(duration = 3000) {
   const [message, setMessage] = React.useState<string | null>(null);
   const [variant, setVariant] = React.useState<ToastVariant>('success');
+  const timeoutRef = React.useRef<number | null>(null);
   const show = React.useCallback(
     (msg: string, v: ToastVariant = 'success') => {
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
       setVariant(v);
       setMessage(msg);
-      window.setTimeout(() => setMessage(null), duration);
+      timeoutRef.current = window.setTimeout(() => setMessage(null), duration);
     },
     [duration],
   );
+  React.useEffect(() => () => {
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+  }, []);
   return { message, variant, show };
 }
