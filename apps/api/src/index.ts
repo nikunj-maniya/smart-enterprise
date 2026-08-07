@@ -31,6 +31,7 @@ import { absencesRouter } from './modules/absences/absences.routes.js';
 import { smartSearchRouter } from './modules/smart-search/smart-search.routes.js';
 import { smartSearchConversationsRouter } from './modules/smart-search/conversation.routes.js';
 import { smartSearchMemoryRouter } from './modules/smart-search/memory.routes.js';
+import { documentSearchRouter } from './modules/smart-search/document-search.routes.js';
 import { slackConfigRouter } from './modules/slack/slack-config.routes.js';
 import { slackWebhookRouter } from './modules/slack/slack-webhook.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
@@ -115,6 +116,7 @@ app.use('/absences', absencesRouter);
 // threads/facts, not an LLM call — no smartSearchRateLimiter needed here.
 app.use('/smart-search/conversations', smartSearchConversationsRouter);
 app.use('/smart-search/memories', smartSearchMemoryRouter);
+app.use('/smart-search/documents', documentSearchRouter);
 app.use('/smart-search', smartSearchRateLimiter, smartSearchRouter);
 app.use('/slack/config', slackConfigRouter);
 app.use('/slack/interactions', slackWebhookRouter);

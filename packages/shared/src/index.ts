@@ -1483,6 +1483,23 @@ export const smartSearchRequestSchema = z.object({
 });
 export type SmartSearchRequest = z.infer<typeof smartSearchRequestSchema>;
 
+/** One matching passage returned by the `search_docs` tool — a `document_chunks` row's `source`
+ *  (for citation) and `content`, nothing else (never the embedding, tenant, or role list). */
+export const documentSearchResultSchema = z.object({
+  source: z.string(),
+  content: z.string(),
+});
+export type DocumentSearchResultDto = z.infer<typeof documentSearchResultSchema>;
+
+/** Admin ingestion request body for `POST /smart-search/documents` — chunks and embeds `content`
+ *  under `source` (for citation), visible only to `allowedRoles` (empty = whole tenant). */
+export const documentIngestSchema = z.object({
+  source: z.string().trim().min(1).max(200),
+  content: z.string().min(1).max(1_000_000),
+  allowedRoles: z.array(z.string().trim().min(1)).default([]),
+});
+export type DocumentIngest = z.infer<typeof documentIngestSchema>;
+
 export const smartSearchToolNameSchema = z.enum([
   'queryAbsences',
   'queryUsers',
@@ -1493,6 +1510,8 @@ export const smartSearchToolNameSchema = z.enum([
   'queryMyLeaveBalances',
   'queryMyApprovals',
   'queryFrontDeskVisitors',
+  'search_docs',
+  'queryRoles',
 ]);
 export type SmartSearchToolName = z.infer<typeof smartSearchToolNameSchema>;
 
@@ -1564,6 +1583,20 @@ export const smartSearchResponseSchema = z.discriminatedUnion('toolUsed', [
     toolUsed: z.literal('queryFrontDeskVisitors'),
     denied: z.boolean(),
     rows: z.array(frontDeskVisitorDtoSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    conversationId: z.string(),
+    toolUsed: z.literal('search_docs'),
+    denied: z.boolean(),
+    rows: z.array(documentSearchResultSchema),
+  }),
+  z.object({
+    reply: z.string(),
+    conversationId: z.string(),
+    toolUsed: z.literal('queryRoles'),
+    denied: z.boolean(),
+    rows: z.array(roleSchema),
   }),
   z.object({
     reply: z.string(),

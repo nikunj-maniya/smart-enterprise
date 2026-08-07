@@ -171,6 +171,12 @@ async function maybeCompact(tenantId: string, userId: string, conversationId: st
  * infrequently, thread compaction — see `extractSafely`/`maybeCompact` above for why those are
  * gated the way they are. At most two tool-calling-flow model round-trips per question
  * (tool-selection, then narration) plus, occasionally, one more for extraction/compaction.
+ *
+ * KNOWN GAP (step 3): "at most one tool" means a single question spanning two domains (e.g. "give
+ * me the list of roles and departments") only ever gets one of them answered — the model picks
+ * whichever tool's description best matches, the other domain is silently dropped. Fixing this
+ * for real needs multi-tool-per-turn support, which this orchestrator doesn't have; the tool
+ * descriptions in smart-search.tools.ts are tuned to at least pick the RIGHT single tool.
  */
 export async function handleSmartSearch(
   tenantId: string,

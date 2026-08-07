@@ -4,11 +4,13 @@ import {
   SystemRoleKey,
   type ApprovalQueueItemDto,
   type DepartmentDto,
+  type DocumentSearchResultDto,
   type FrontDeskVisitorDto,
   type HolidayDto,
   type LeaveBalanceDto,
   type OrgUserDto,
   type ProjectDto,
+  type RoleDto,
 } from '@se/shared';
 import { prisma } from '../../prisma.js';
 import { redisConnection } from '../../lib/redis.js';
@@ -20,7 +22,9 @@ import {
   queryHolidaysArgsSchema,
   queryMyApprovalsArgsSchema,
   queryProjectsArgsSchema,
+  queryRolesArgsSchema,
   resolveDateRange,
+  searchDocsArgsSchema,
   SMART_SEARCH_TOOLS,
 } from './smart-search.tools.js';
 
@@ -512,5 +516,98 @@ describe('queryUsers', () => {
     ];
     const rows = (await tool.execute('t1', ADMIN, { ...noArgs, role: 'not a real role' })) as OrgUserDto[];
     assert.equal(rows.length, 0);
+  });
+});
+
+describe('search_docs', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'search_docs')!;
+  let queryRawCalls: unknown[][] = [];
+  const realFetch = globalThis.fetch;
+
+  Object.defineProperty(globalThis, 'fetch', {
+    value: async () => ({ ok: true, json: async () => ({ data: [{ embedding: [0.1, 0.2] }] }) }),
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(prisma, '$queryRaw', {
+    value: async (_strings: readonly string[], ...values: unknown[]) => {
+      queryRawCalls.push(values);
+      return [{ source: 'handbook.pdf', content: 'Matching passage.' }];
+    },
+    configurable: true,
+  });
+
+  afterEach(() => {
+    Object.defineProperty(globalThis, 'fetch', { value: realFetch, configurable: true, writable: true });
+  });
+
+  beforeEach(() => {
+    queryRawCalls = [];
+  });
+
+  it('embeds the query and filters by tenantId + the viewer\'s own roles, never a supplied value', async () => {
+    const rows = (await tool.execute('t1', viewer('u1', ['HrHead']), { query: 'leave policy' })) as DocumentSearchResultDto[];
+    assert.equal(rows[0].source, 'handbook.pdf');
+    assert.equal(queryRawCalls[0][0], 't1'); // tenantId
+    assert.equal(queryRawCalls[0][1], '{"HrHead"}'); // viewer.roles, never model-supplied
+  });
+});
+
+describe('queryRoles', () => {
+  const tool = SMART_SEARCH_TOOLS.find((t) => t.name === 'queryRoles')!;
+  let roleRows: { id: string; name: string; isSystem: boolean; permissions: string[]; archived: boolean; _count: { users: number } }[] = [];
+
+  // Set fresh in beforeEach, not once at the top level: the queryUsers block above also mutates
+  // `prisma.role` (its own beforeEach/afterEach), and this file's tests don't run in strict
+  // top-to-bottom order, so a one-time top-level assignment here isn't guaranteed to still be
+  // there by the time these tests run (verified live — it wasn't).
+  beforeEach(() => {
+    roleRows = [];
+    Object.defineProperty(prisma, 'role', {
+      value: {
+        findMany: async () => roleRows,
+        count: async () => roleRows.length,
+      },
+      configurable: true,
+    });
+  });
+
+  it('an Employee (not Enterprise Admin) is denied with HttpError(403)', async () => {
+    await assert.rejects(
+      () => tool.execute('t1', EMPLOYEE, { search: undefined, archived: undefined }),
+      (err: unknown) => err instanceof HttpError && err.status === 403,
+    );
+  });
+
+  it('an Enterprise Admin gets the role master list', async () => {
+    roleRows = [{ id: 'r1', name: 'Tech Lead', isSystem: true, permissions: [], archived: false, _count: { users: 3 } }];
+    const admin = viewer('admin1', [SystemRoleKey.EnterpriseAdmin]);
+    const rows = (await tool.execute('t1', admin, { search: undefined, archived: undefined })) as RoleDto[];
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].name, 'Tech Lead');
+    assert.equal(rows[0].memberCount, 3);
+  });
+});
+
+describe('queryRolesArgsSchema', () => {
+  it('normalizes an explicit null (model-supplied unset arg) to undefined', () => {
+    const result = queryRolesArgsSchema.parse({ search: null, archived: null });
+    assert.equal(result.search, undefined);
+    assert.equal(result.archived, undefined);
+  });
+
+  it('passes a real boolean archived value through untouched', () => {
+    assert.equal(queryRolesArgsSchema.parse({ archived: true }).archived, true);
+  });
+});
+
+describe('searchDocsArgsSchema', () => {
+  it('requires a non-empty query', () => {
+    assert.equal(searchDocsArgsSchema.safeParse({ query: '' }).success, false);
+    assert.equal(searchDocsArgsSchema.safeParse({}).success, false);
+  });
+
+  it('accepts a query string', () => {
+    assert.equal(searchDocsArgsSchema.parse({ query: 'leave policy' }).query, 'leave policy');
   });
 });

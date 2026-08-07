@@ -14,12 +14,14 @@ import {
   type ApprovalQueueItemDto,
   type DepartmentDto,
   type DepartmentsQuery,
+  type DocumentSearchResultDto,
   type FrontDeskVisitorDto,
   type HolidayDto,
   type LeaveBalanceDto,
   type OrgUserDto,
   type ProjectDto,
   type RequestListItemDto,
+  type RoleDto,
   type SmartSearchToolName,
 } from '@se/shared';
 import { HttpError } from '../../lib/http-error.js';
@@ -34,6 +36,7 @@ import { listProjects } from '../projects/projects.service.js';
 import { listRoles } from '../roles/roles.service.js';
 import { listApprovalQueue, listMyRequests } from '../requests/requests.service.js';
 import { searchDirectoryUsers } from '../directory/directory.service.js';
+import { searchDocuments } from './document-search.service.js';
 
 // Mirrors `ABSENCE_VIEWER_ROLES` in departments.routes.ts/projects.routes.ts verbatim — not
 // imported from there since neither file exports it, and both master lists share the same
@@ -153,6 +156,15 @@ export const queryUsersArgsSchema = z.object({
 });
 export type QueryUsersArgs = z.infer<typeof queryUsersArgsSchema>;
 
+// Mirrors queryDepartmentsArgsSchema — same master-list shape, one per resource. Split out from
+// queryUsers (see its tightened description below) since "list of roles" was being answered by
+// queryUsers' full employee directory instead of the tenant's actual Role master list.
+export const queryRolesArgsSchema = z.object({
+  search: nullishString,
+  archived: z.boolean().nullish().transform((v) => v ?? undefined),
+});
+export type QueryRolesArgs = z.infer<typeof queryRolesArgsSchema>;
+
 // `range` is optional here (unlike queryAbsences, where a time window is always implied): a
 // question like "what are all my requests" has no date to scope by, so omitting `range` returns
 // the viewer's recent history unfiltered. When one IS given ("my leave request for tomorrow"),
@@ -209,6 +221,11 @@ export type QueryMyLeaveBalancesArgs = z.infer<typeof queryMyLeaveBalancesArgsSc
 // for the model to supply.
 export const queryFrontDeskVisitorsArgsSchema = z.object({});
 export type QueryFrontDeskVisitorsArgs = z.infer<typeof queryFrontDeskVisitorsArgsSchema>;
+
+export const searchDocsArgsSchema = z.object({
+  query: z.string().min(1),
+});
+export type SearchDocsArgs = z.infer<typeof searchDocsArgsSchema>;
 
 export const queryMyApprovalsArgsSchema = z.object({
   // Defaults to "pending" (not left unset) since "what's pending my approval" is by far the more
@@ -303,7 +320,7 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
   defineTool<QueryUsersArgs>({
     name: 'queryUsers',
     description:
-      'Answers questions about the tenant user directory — list, search, or filter employees by name/email, status, department, or role (e.g. "list all Project Managers", "who are the HR Heads", or any of the tenant\'s own custom roles). "Project Manager" here is a ROLE held by a person, not the queryProjects tool\'s PROJECT records — use this tool, not queryProjects, whenever the question is asking for people (a list of employees/managers), not named projects. Enterprise Admin only.',
+      'Answers questions about the tenant user directory — list, search, or filter EMPLOYEES (people) by name/email, status, department, or role (e.g. "list all Project Managers", "who are the HR Heads", or any of the tenant\'s own custom roles). Always returns one row per PERSON. NOT for the tenant\'s master list of role or department NAMES itself, with no person filter implied ("what roles do we have", "list our departments") — use queryRoles or queryDepartments for that instead. "Project Manager" here is a ROLE held by a person, not the queryProjects tool\'s PROJECT records — use this tool, not queryProjects, whenever the question is asking for people (a list of employees/managers), not named projects. Enterprise Admin only.',
     parameters: {
       type: 'object',
       properties: {
@@ -347,6 +364,34 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
         roleId,
       });
       const result = await listOrgUsers(tenantId, query);
+      return result.rows;
+    },
+  }),
+  defineTool<QueryRolesArgs>({
+    name: 'queryRoles',
+    description:
+      'Answers questions about the tenant\'s ROLE master list itself — what roles exist, which are built-in vs. custom, and how many people hold each (e.g. "what roles do we have?", "list our custom roles", "how many people are Tech Leads?"). NOT for finding people who hold a role (queryUsers) or a specific named colleague (queryAbsences/queryUsers). Enterprise Admin only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Free-text match against role name.' },
+        archived: {
+          type: 'boolean',
+          description: 'Optional filter: true for archived (custom) roles only, false for active only. Omit for both.',
+        },
+      },
+      required: [],
+    },
+    argsSchema: queryRolesArgsSchema,
+    execute: async (tenantId, viewer, args): Promise<RoleDto[]> => {
+      // `listRoles` itself enforces no permission check (today it's gated only by the
+      // `requireEnterpriseAdmin` Express middleware on the REST route) — so the tool executor adds
+      // the same check explicitly before touching any data, same pattern as queryUsers above.
+      if (!viewer.roles.includes(SystemRoleKey.EnterpriseAdmin)) {
+        throw new HttpError(403, 'Enterprise Admin access required');
+      }
+      const query = rolesQuerySchema.parse({ page: 1, pageSize: 25, search: args.search, archived: args.archived });
+      const result = await listRoles(tenantId, query);
       return result.rows;
     },
   }),
@@ -527,6 +572,24 @@ export const SMART_SEARCH_TOOLS: SmartSearchToolEntry[] = [
       // by lifecycle bucket): every row already carries `status`/`checkInAt`/`checkOutAt`, enough
       // for narration to state which bucket a visitor is in without a second, bucket-picking arg.
       return [...expected, ...onSite, ...checkedOut];
+    },
+  }),
+  defineTool<SearchDocsArgs>({
+    name: 'search_docs',
+    description:
+      'Searches unstructured tenant documents (policies, handbooks, guides, and other uploaded text) for passages relevant to the question, returning matching passages with their source for citation. Use for open-ended "what does our policy say about..." / "how do I..." questions not covered by a structured data tool. NOT for structured data already covered by another tool (leave balances, requests, directory, projects, departments, holidays, approvals, visitors) — prefer the specific tool when one applies. Available to any authenticated user; per-document visibility is enforced server-side, not by this tool.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The question or topic to search the documents for.' },
+      },
+      required: ['query'],
+    },
+    argsSchema: searchDocsArgsSchema,
+    execute: async (tenantId, viewer, args): Promise<DocumentSearchResultDto[]> => {
+      // Tenant + role filtering happens entirely in SQL inside searchDocuments — the model only
+      // ever supplies the free-text query, never tenantId/roles, same pattern as every tool above.
+      return searchDocuments(tenantId, viewer.roles, args.query);
     },
   }),
 ];
