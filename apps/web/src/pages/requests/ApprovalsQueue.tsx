@@ -46,7 +46,11 @@ export default function ApprovalsQueue() {
             for (const entry of row.chain) if (entry.approverId === user?.id) next.add(entry.roleContext);
           }
           const merged = [...next];
-          setRoleContext((current) => current ?? merged[0]);
+          // Only auto-select a role context (and thus trigger the filtered refetch below) when
+          // the caller actually holds more than one — with a single role, the unfiltered result
+          // we already have *is* that role's queue, so setting it would just cost a redundant,
+          // identical network round trip.
+          if (merged.length > 1) setRoleContext((current) => current ?? merged[0]);
           return merged;
         });
       })

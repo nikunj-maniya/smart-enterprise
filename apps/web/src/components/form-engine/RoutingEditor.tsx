@@ -16,12 +16,17 @@ import { Button } from '@/components/ui/button';
  * optional single-condition visibility gate (0 or 1 `RuleRow`, reusing `FieldModal`'s rule-row
  * editor rather than the multi-condition AND-list a field's Visibility section supports). */
 interface StageRow {
+  /** Client-only key: stages have no natural unique identity (two can share the same field while
+   *  being configured), so a generated id keeps an in-progress edit on its own row across
+   *  add/remove instead of following its array position. */
+  id: string;
   field: string;
   gateRows: RuleRow[];
 }
 
 function stagesFromStageRules(stageRules: StageRules | null): StageRow[] {
   return (stageRules?.approvers ?? []).map((rule) => ({
+    id: crypto.randomUUID(),
     field: rule.field,
     gateRows: rule.when ? rowsFromRule(rule.when) : [],
   }));
@@ -88,7 +93,7 @@ export function RoutingEditor({
 
   function addStage() {
     setLocalError(null);
-    setStages((prev) => [...prev, { field: pickerFields[0]?.key ?? '', gateRows: [] }]);
+    setStages((prev) => [...prev, { id: crypto.randomUUID(), field: pickerFields[0]?.key ?? '', gateRows: [] }]);
   }
 
   function updateStage(index: number, patch: Partial<StageRow>) {
@@ -152,7 +157,7 @@ export function RoutingEditor({
             <div className="flex flex-col gap-[10px]">
               {stages.map((stage, index) => (
                 <div
-                  key={index}
+                  key={stage.id}
                   className="flex flex-col gap-3 rounded-[10px] border border-line-soft bg-app-bg px-[14px] py-3"
                 >
                   <div className="flex items-center gap-3">

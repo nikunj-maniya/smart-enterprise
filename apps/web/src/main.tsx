@@ -7,7 +7,10 @@ import { AuthProvider } from '@/lib/auth';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import './index.css';
 
-const queryClient = new QueryClient();
+// Default staleTime of 0 means every remount/window-refocus refetches — fine for data that
+// changes under the user, wasteful for the mostly-static option lists queries fetch today.
+// 60s keeps those reasonably fresh without refetching on every navigation back to a page.
+const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 60_000 } } });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

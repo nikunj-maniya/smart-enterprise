@@ -59,7 +59,13 @@ export function StatusModelEditor({
   onSave: (model: StatusModel) => void;
 }) {
   const [states, setStates] = React.useState<string[]>(() => statusModel?.states ?? []);
-  const [transitions, setTransitions] = React.useState<StatusTransition[]>(() => statusModel?.transitions ?? []);
+  // Transitions carry no natural unique key (two can share the same from/to while roles are
+  // still being picked), so a client-only `id` is generated once per row and used as the React
+  // key — keeping it stable across add/remove keeps an in-progress edit on the row it belongs to
+  // instead of following its array position.
+  const [transitions, setTransitions] = React.useState<(StatusTransition & { id: string })[]>(
+    () => (statusModel?.transitions ?? []).map((t) => ({ ...t, id: crypto.randomUUID() })),
+  );
   const [dragIndex, setDragIndex] = React.useState<number | null>(null);
   const [localError, setLocalError] = React.useState<string | null>(null);
 
@@ -118,7 +124,10 @@ export function StatusModelEditor({
 
   function addTransition() {
     setLocalError(null);
-    setTransitions((prev) => [...prev, { from: states[0] ?? '', to: states[1] ?? states[0] ?? '', roles: [] }]);
+    setTransitions((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), from: states[0] ?? '', to: states[1] ?? states[0] ?? '', roles: [] },
+    ]);
   }
 
   function updateTransition(index: number, patch: Partial<StatusTransition>) {
@@ -150,7 +159,7 @@ export function StatusModelEditor({
       setLocalError('Pick at least one role for every transition, or remove it.');
       return;
     }
-    onSave({ states, transitions });
+    onSave({ states, transitions: transitions.map((t) => ({ from: t.from, to: t.to, roles: t.roles })) });
   }
 
   return (
@@ -166,7 +175,7 @@ export function StatusModelEditor({
         <div className="flex flex-col gap-[10px]">
           {states.map((name, index) => (
             <div
-              key={index}
+              key={name}
               draggable={!disabled}
               onDragStart={(e) => {
                 e.dataTransfer.setData('text/plain', String(index));
@@ -230,7 +239,7 @@ export function StatusModelEditor({
             <div className="flex flex-col gap-[10px]">
               {transitions.map((transition, index) => (
                 <div
-                  key={index}
+                  key={transition.id}
                   className="flex flex-col gap-3 rounded-[10px] border border-line-soft bg-app-bg px-[14px] py-3"
                 >
                   <div className="flex items-center gap-3">

@@ -1,45 +1,52 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { SystemRoleKey } from '@se/shared';
-import Login from '@/pages/Login';
-import Register from '@/pages/Register';
-import ChangePassword from '@/pages/ChangePassword';
-import ForgotPassword from '@/pages/ForgotPassword';
-import SetNewPassword from '@/pages/SetNewPassword';
-import Join from '@/pages/Join';
-import Profile from '@/pages/Profile';
-import Notifications from '@/pages/Notifications';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { RequireRole } from '@/components/RequireRole';
 import { AppShell } from '@/components/shell/AppShell';
-import Overview from '@/pages/console/Overview';
-import Registrations from '@/pages/console/Registrations';
-import Enterprises from '@/pages/console/Enterprises';
-import PlatformUsers from '@/pages/console/PlatformUsers';
-import AuditLog from '@/pages/console/AuditLog';
-import Settings from '@/pages/console/Settings';
-import OrgUsers from '@/pages/organization/Users';
-import Departments from '@/pages/organization/Departments';
-import Roles from '@/pages/organization/Roles';
-import Projects from '@/pages/organization/Projects';
-import CompanyDetails from '@/pages/organization/CompanyDetails';
-import FormBuilder from '@/pages/organization/FormBuilder';
-import LeavePolicy from '@/pages/organization/LeavePolicy';
-import ItemCatalog from '@/pages/organization/ItemCatalog';
-import NewRequest from '@/pages/requests/NewRequest';
-import RequestForm from '@/pages/requests/RequestForm';
-import MyRequests from '@/pages/requests/MyRequests';
-import ApprovalsQueue from '@/pages/requests/ApprovalsQueue';
-import HrSignoffs from '@/pages/requests/HrSignoffs';
-import HrAbsences from '@/pages/requests/HrAbsences';
-import FrontDesk from '@/pages/requests/FrontDesk';
-import FulfilmentQueue from '@/pages/requests/FulfilmentQueue';
-import AbsenceCalendar from '@/pages/organization/AbsenceCalendar';
-import SlackIntegration from '@/pages/organization/SlackIntegration';
-import Reports from '@/pages/requests/Reports';
-import AttendanceReport from '@/pages/requests/AttendanceReport';
-import Holidays from '@/pages/organization/Holidays';
 import { OfflineBanner } from '@/components/shell/OfflineBanner';
 import { useAuth } from '@/lib/auth';
+
+const Login = lazy(() => import('@/pages/Login'));
+const Register = lazy(() => import('@/pages/Register'));
+const ChangePassword = lazy(() => import('@/pages/ChangePassword'));
+const ForgotPassword = lazy(() => import('@/pages/ForgotPassword'));
+const SetNewPassword = lazy(() => import('@/pages/SetNewPassword'));
+const Join = lazy(() => import('@/pages/Join'));
+const Profile = lazy(() => import('@/pages/Profile'));
+const Notifications = lazy(() => import('@/pages/Notifications'));
+const Overview = lazy(() => import('@/pages/console/Overview'));
+const Registrations = lazy(() => import('@/pages/console/Registrations'));
+const Enterprises = lazy(() => import('@/pages/console/Enterprises'));
+const PlatformUsers = lazy(() => import('@/pages/console/PlatformUsers'));
+const AuditLog = lazy(() => import('@/pages/console/AuditLog'));
+const Settings = lazy(() => import('@/pages/console/Settings'));
+const OrgUsers = lazy(() => import('@/pages/organization/Users'));
+const Departments = lazy(() => import('@/pages/organization/Departments'));
+const Roles = lazy(() => import('@/pages/organization/Roles'));
+const Projects = lazy(() => import('@/pages/organization/Projects'));
+const CompanyDetails = lazy(() => import('@/pages/organization/CompanyDetails'));
+const FormBuilder = lazy(() => import('@/pages/organization/FormBuilder'));
+const LeavePolicy = lazy(() => import('@/pages/organization/LeavePolicy'));
+const ItemCatalog = lazy(() => import('@/pages/organization/ItemCatalog'));
+const NewRequest = lazy(() => import('@/pages/requests/NewRequest'));
+const RequestForm = lazy(() => import('@/pages/requests/RequestForm'));
+const MyRequests = lazy(() => import('@/pages/requests/MyRequests'));
+const ApprovalsQueue = lazy(() => import('@/pages/requests/ApprovalsQueue'));
+const HrSignoffs = lazy(() => import('@/pages/requests/HrSignoffs'));
+const HrAbsences = lazy(() => import('@/pages/requests/HrAbsences'));
+const FrontDesk = lazy(() => import('@/pages/requests/FrontDesk'));
+const FulfilmentQueue = lazy(() => import('@/pages/requests/FulfilmentQueue'));
+const AbsenceCalendar = lazy(() => import('@/pages/organization/AbsenceCalendar'));
+const SlackIntegration = lazy(() => import('@/pages/organization/SlackIntegration'));
+const Reports = lazy(() => import('@/pages/requests/Reports'));
+const AttendanceReport = lazy(() => import('@/pages/requests/AttendanceReport'));
+const Holidays = lazy(() => import('@/pages/organization/Holidays'));
+
+/** Suspense fallback for lazy-loaded pages, matching ProtectedRoute's loading state. */
+function PageFallback() {
+  return <div className="flex min-h-screen items-center justify-center text-ink-400">Loading…</div>;
+}
 
 /** Landing routes each persona to their home: System Admin → platform overview, Enterprise Admin → org users, everyone else → My Requests. */
 function Home() {
@@ -55,6 +62,7 @@ export default function App() {
   return (
     <>
       <OfflineBanner />
+      <Suspense fallback={<PageFallback />}>
       <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
@@ -235,6 +243,7 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </>
   );
 }

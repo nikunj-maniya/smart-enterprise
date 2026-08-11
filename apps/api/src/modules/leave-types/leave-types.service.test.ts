@@ -90,20 +90,6 @@ Object.defineProperty(prisma, '$transaction', {
             if (b.leaveTypeId === where.leaveTypeId) b.balance += data.balance.increment;
           }
         },
-        upsert: async ({
-          where,
-          create,
-        }: {
-          where: { userId_leaveTypeId_period: { userId: string; leaveTypeId: string; period: string } };
-          update: unknown;
-          create: BalanceRow;
-        }) => {
-          const key = where.userId_leaveTypeId_period;
-          const existing = balanceRows.find(
-            (b) => b.userId === key.userId && b.leaveTypeId === key.leaveTypeId && b.period === key.period,
-          );
-          if (!existing) balanceRows.push(create);
-        },
         deleteMany: async ({ where }: { where: { leaveTypeId: string } }) => {
           balanceRows = balanceRows.filter((b) => b.leaveTypeId !== where.leaveTypeId);
         },

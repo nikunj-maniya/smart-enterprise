@@ -1,12 +1,13 @@
 /**
- * Thin hand-rolled wrapper around an OpenAI-compatible `/chat/completions` endpoint (Ollama in
- * dev, per env vars below). No SDK, no framework — native `fetch` only, per this repo's "no
- * unnecessary dependencies" rule. The model never sees tenant data beyond what the orchestrator
- * explicitly passes it in `messages`.
+ * Thin hand-rolled wrapper around an OpenAI-compatible `/chat/completions` and `/embeddings`
+ * endpoint (Ollama in dev, per env vars below). No SDK, no framework — native `fetch` only, per
+ * this repo's "no unnecessary dependencies" rule. The model never sees tenant data beyond what the
+ * orchestrator explicitly passes it in `messages`.
  */
 
 const LLM_BASE_URL = process.env.LLM_BASE_URL ?? 'http://localhost:11434/v1';
 const LLM_MODEL = process.env.LLM_MODEL ?? 'qwen2.5:7b-instruct';
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL ?? 'nomic-embed-text';
 
 export interface LlmChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -81,6 +82,30 @@ export async function narrate(messages: LlmChatMessage[]): Promise<string> {
   // determinism, same reasoning as `selectTool`'s temperature setting above.
   const response = await chatCompletion({ messages, temperature: 0 });
   return response.choices[0]?.message.content ?? '';
+}
+
+interface EmbeddingResponse {
+  data: Array<{ embedding: number[] }>;
+}
+
+/**
+ * Embeds a single string via Ollama's OpenAI-compatible `/embeddings` endpoint — used by
+ * document-search.service.ts for both chunk ingestion and query embedding in the `search_docs`
+ * tool. `nomic-embed-text`'s output dimension (768) is fixed by the `document_chunks.embedding`
+ * column (see its migration) — swapping `EMBEDDING_MODEL` for a different-dimension model requires
+ * a matching column change, not just an env var change.
+ */
+export async function embed(text: string): Promise<number[]> {
+  const res = await fetch(`${LLM_BASE_URL}/embeddings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input: text }),
+  });
+  if (!res.ok) {
+    throw new Error(`Embedding request failed: ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as EmbeddingResponse;
+  return body.data[0].embedding;
 }
 
 const MEMORY_EXTRACTION_SYSTEM_PROMPT =
