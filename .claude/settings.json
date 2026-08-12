@@ -42,6 +42,12 @@
             "type": "command",
             "command": "jq -r '.prompt // empty' | grep -qiE \"\\\\b(ui|ux|frontend|screen|page|component|design|layout|style|css|form|wizard|modal|sidebar|dashboard|button|view)\\\\b|admin console\" && printf '%s' \"{\\\"hookSpecificOutput\\\": {\\\"hookEventName\\\": \\\"UserPromptSubmit\\\", \\\"additionalContext\\\": \\\"[design-check] This request looks UI/UX or frontend related. Before writing or modifying any UI code: dispatch a subagent (Agent tool, general-purpose) to fetch and review the relevant screen markup from the Claude Design project via the DesignSync tool - method get_file, projectId 053346e7-8a9a-4991-b4a0-26705793f93b, path \\\\\\\"Smart Enterprise - Prototype.dc.html\\\\\\\" (or the closest matching screen/file in that project). Have the subagent report back a summary of the relevant markup/structure/tokens rather than pulling the full file into the main conversation. Then implement to match the design exactly (colors/tokens, interactions, layout) per project memory.\\\"}}\" 2>/dev/null || true",
             "statusMessage": "Checking if this needs a design review..."
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/prompt-quality-eval.sh 2>/dev/null || true",
+            "timeout": 60,
+            "statusMessage": "Scoring prompt quality against CLAUDE.md Rule 6..."
           }
         ]
       }
